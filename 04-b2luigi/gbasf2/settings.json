@@ -1,0 +1,70 @@
+{
+  "_comment_info": "Configuration for Ds+ -> D0 e+ nu grid analysis",
+  "_comment_location": "/home/belle2/amubarak/Ds2D0enue_Analysis/04-b2luigi/gbasf2/settings.json",
+  
+  "_comment_campaign_selection": "=== MC CAMPAIGN SELECTION ===",
+  "_comment_campaign_toggle": "Set 'mc_campaign' to either 'MC15rd' or 'MC16rd' to choose dataset",
+  "mc_campaign": "MC15rd",
+  
+  "_comment_mc15rd_header": "=== MC15rd CAMPAIGN (1444.0 fb^-1) ===",
+  "MC15rd": {
+    "int_luminosity_fb": 1443.999,
+    "datasets": {
+      "ccbar": "/belle/collection/MC/RSC_MC15rd_4S_ccbar_skim_17230100_v3",
+      "BB": "/belle/collection/MC/RSC_MC15rd_4S_BB_skim_17230100_v3",
+      "ddbar": "/belle/collection/MC/RSC_MC15rd_4S_ddbar_skim_17230100_v3",
+      "ssbar": "/belle/collection/MC/RSC_MC15rd_4S_ssbar_skim_17230100_v3",
+      "taupair": "/belle/collection/MC/RSC_MC15rd_4S_taupair_skim_17230100_v3",
+      "uubar": "/belle/collection/MC/RSC_MC15rd_4S_uubar_skim_17230100_v3"
+    }
+  },
+  
+  "_comment_mc16rd_header": "=== MC16rd CAMPAIGN (215.29 fb^-1) ===",
+  "MC16rd": {
+    "int_luminosity_fb": 215.28939989827998,
+    "datasets": {
+      "ccbar": "/belle/collection/MC/MC16rd_proc16_chunk1_ccbar_4S_v1",
+      "charged": "/belle/collection/MC/MC16rd_proc16_chunk1_charged_4S_v1",
+      "ddbar": "/belle/collection/MC/MC16rd_proc16_chunk1_ddbar_4S_v1",
+      "mixed": "/belle/collection/MC/MC16rd_proc16_chunk1_mixed_4S_v1",
+      "ssbar": "/belle/collection/MC/MC16rd_proc16_chunk1_ssbar_4S_v1",
+      "taupair": "/belle/collection/MC/MC16rd_proc16_chunk1_taupair_4S_v1",
+      "uubar": "/belle/collection/MC/MC16rd_proc16_chunk1_uubar_4S_v1"
+    }
+  },
+  
+  "_comment_run_control": "=== RUN CONTROL ===",
+  "_comment_backgrounds_note": "For MC15rd use: ccbar, BB, ddbar, ssbar, taupair, uubar",
+  "_comment_backgrounds_note2": "For MC16rd use: ccbar, charged, ddbar, mixed, ssbar, taupair, uubar",
+  "_comment_date_format": "Date format: YYMMDD (e.g., 251201 = Dec 1, 2025)",
+  "date": "251201",
+  "attempt": 1,
+  "backgrounds_to_run": ["taupair"],
+  "modes_to_run": ["kmpippi0"],
+  
+  "_comment_reconstruction": "=== RECONSTRUCTION SETTINGS ===",
+  "pi0_list": "eff10_May2020",
+  "basf2_release": "light-2409-toyger",
+  
+  "_comment_gbasf2": "=== GBASF2 GRID SETTINGS ===",
+  "_comment_project_naming": "Short template for gbasf2 (b2luigi adds unique hash automatically)",
+  "_comment_project_example": "Example: Ds_tau_kmpippi0 (18 chars) + b2luigi hash (10 chars) = 28 chars",
+  "gbasf2_project_name_template": "Ds_{background}_{mode}",
+  "gbasf2_max_retries": 3,
+  "gbasf2_download_logs": false,
+  "gbasf2_cputime": 5,
+  "gbasf2_force_submission": false,
+  
+  "_comment_output": "=== OUTPUT DIRECTORIES ===",
+  "_comment_output_naming": "Merged files include full date and attempt for tracking",
+  "result_dir": "/group/belle/users/amubarak/02-Grid/b2luigi_outputs",
+  "download_dir": "/group/belle/users/amubarak",
+  "merge_output_dir": "/group/belle/users/amubarak/02-Grid/Sample_Grid",
+  "remove_downloads_after_merge": false,
+  "terminal_logs_dir": "/home/belle2/amubarak/C02-Grid/Terminal_Output",
+  
+  "_comment_scheduler": "=== CENTRAL SCHEDULER (Optional Web Monitoring) ===",
+  "use_central_scheduler": false,
+  "central_scheduler_host": "localhost",
+  "central_scheduler_port": 8082
+}

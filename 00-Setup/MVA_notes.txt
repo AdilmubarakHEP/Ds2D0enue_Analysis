@@ -1,0 +1,24 @@
+First:
+Split up the data set.
+basf2_mva_merge_mc -s /home/belle2/amubarak/C01-Simulated_Events/Ds2D0enu-Signal.root \
+                   -b /home/belle2/amubarak/C03-Grid/Completed/Ds2D0e-Generic_Ds_071624_ccbar.root \
+                   -t dstree \
+                   --ftest 0.7 \
+                   -o MVA/Splits/Ds2D0e.root
+                   --cut_bkg "Ds_ifNANgiveX_isSignal_5!=5"
+
+Train:
+basf2 Ds2D0enue_Analysis/MVA/Ds2D0e_MVATrain.py
+
+Results:
+Signal:
+basf2_mva_expert --identifiers C02-MVA/Completed/MVAFastBDT.root \
+                --datafiles /home/belle2/amubarak/C01-Simulated_Events/Ds2D0enu-Signal.root \
+                --treename dstree \
+                --outputfile C02-MVA/Completed/Ds2D0enu-Signal_MVA.root
+
+Background:
+basf2_mva_expert --identifiers C02-MVA/Completed/MVAFastBDT.root \
+                --datafiles /home/belle2/amubarak/C03-Grid/Completed/Ds2D0e-Generic_Ds_071624_ccbar.root \
+                --treename dstree \
+                --outputfile C02-MVA/Completed/Ds2D0enu-Background_MVA.root

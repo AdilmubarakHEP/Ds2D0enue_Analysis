@@ -1,0 +1,112 @@
+Grid:
+gb2_load
+Password: .BgPPHs4dKc22_G
+source /cvmfs/belle.kek.jp/grid/gbasf2/pro/bashrc
+
+Gbasf2 Tools:
+      gb2_se_list
+      gb2_check_release
+      gb2_project_summary -p <Project_Name>
+      gb2_job_status -p <Project_Name>
+      gb2_ds_search collection --get_metadata <collection_path>
+      gb2_ds_search collection --list_all_collections /belle/collection/MC/*
+
+      gb2_ds_query_file -l <input_dataset>  # Check the content of the data file.
+      gbasf2 <your_steering_file.py> -p <project_name> -i <input_dataset> -s <available_basf2.release>
+
+      MCri Signal production:
+            To get your signal a query to DSS is needed, like the following one (change the mc_event EventType to you need)
+            gb2_ds_search dataset --campaign MC15ri_b --data_type mc --mc_event <EventType> --bkg_level BGx1
+            gb2_ds_search dataset --campaign MC15ri_b --data_type mc --mc_event <EventType>
+
+            gb2_ds_get --new <Signal_Sample>
+
+Download:
+	1). gb2_ds_list <project_name> # Check the contents
+	2). gb2_ds_get <project_name> --new
+      3). (nohup gb2_ds_get --force <project_name>) > <project_name>.out &
+          jobs -l
+                  gb2_proxy_init -g belle
+      *If you use "gb2_ds_rep -d <destination_SE> myProject" then you can speed up the downloading.
+
+For more files to run over:
+      gb2_ds_search dataset [-h] [-o OUTPUT_FILE] [--campaign CAMPAIGN]
+                        [--data_type DATA_TYPE] [--data_level DATA_LEVEL]
+                        [--run_high RUN_HIGH] [--exp_high EXP_HIGH]
+                        [--run_low RUN_LOW] [--exp_low EXP_LOW]
+                        [--mc_event MC_EVENT] [--skim_decay SKIM_DECAY]
+                        [--general_skim GENERAL_SKIM]
+                        [--beam_energy BEAM_ENERGY]
+                        [--global_tag GLOBAL_TAG] [--release RELEASE]
+                        [--bkg_level BKG_LEVEL]
+      gb2_ds_search metadata --table {Releases,GlobalTags,MCEventTypes,GeneralSkimNames,SkimDecayModes,Campaigns,DataTypes,DataLevels,BeamEnergies,BkgLevels}
+            Use: gb2_ds_search metadata --table Releases
+      gb2_ds_search dataset -o Grid/Inputs/grid_charged.txt --campaign MC15rd_b --data_type MC --data_level mdst --mc_event charged --beam_energy 4S --bkg_level BGx1
+
+Submit Grid Jobs:
+      gbasf2 Steering_Scripts/Ds2D0e-Reconstruction.py -p Ds_071624_ccbar -s light-2311-nebelung --input_dslist Grid/Inputs/grid_ccbar.txt
+      gbasf2 Ds2D0enue_Analysis/KEK_Server/Steering_Scripts/Ds2D0e-Conversion.py -p Ds_07312024_Conversion_ccbar -s light-2311-nebelung --input_dslist Ds2D0enue_Analysis/KEK_Server/Grid/Inputs/grid_ccbar.txt
+
+      gbasf2 Steering_Scripts/Ds2D0e-Reconstruction.py -p Ds_062324_charged -s light-2311-nebelung --input_dslist Grid/Inputs/grid_charged.txt 
+      gbasf2 Steering_Scripts/Ds2D0e-Reconstruction.py -p Ds_062324_ddbar -s light-2311-nebelung --input_dslist Grid/Inputs/grid_ddbar.txt 
+      gbasf2 Steering_Scripts/Ds2D0e-Reconstruction.py -p Ds_062324_mixed -s light-2311-nebelung --input_dslist Grid/Inputs/grid_mixed.txt 
+      gbasf2 Steering_Scripts/Ds2D0e-Reconstruction.py -p Ds_062324_ssbar -s light-2311-nebelung --input_dslist Grid/Inputs/grid_ssbar.txt 
+      gbasf2 Steering_Scripts/Ds2D0e-Reconstruction.py -p Ds_062324_taupair -s light-2311-nebelung --input_dslist Grid/Inputs/grid_taupair.txt 
+      gbasf2 Steering_Scripts/Ds2D0e-Reconstruction.py -p Ds_062324_uubar -s light-2311-nebelung --input_dslist Grid/Inputs/grid_uubar.txt
+
+      Collections:
+      gbasf2 Steering_Scripts/Ds2D0e-Reconstruction.py -p Ds_062324_ccbar -s light-2311-nebelung -i /belle/collection/MC/MC15rd_ccbar_exp20_bucket26_v1
+      gbasf2 Steering_Scripts/Ds2D0e-Reconstruction.py -p Ds_062324_charged -s light-2311-nebelung -i /belle/collection/MC/MC15rd_charged_exp20_bucket26_v1
+      gbasf2 Steering_Scripts/Ds2D0e-Reconstruction.py -p Ds_062324_ddbar -s light-2311-nebelung -i /belle/collection/MC/MC15rd_ddbar_exp20_bucket26_v1
+      gbasf2 Steering_Scripts/Ds2D0e-Reconstruction.py -p Ds_062324_mixed -s light-2311-nebelung -i /belle/collection/MC/MC15rd_mixed_exp20_bucket26_v1
+      gbasf2 Steering_Scripts/Ds2D0e-Reconstruction.py -p Ds_060824_ssbar -s light-2311-nebelung -i /belle/collection/MC/MC15rd_ssbar_exp20_bucket26_v1
+      gbasf2 Steering_Scripts/Ds2D0e-Reconstruction.py -p Ds_062324_taupair -s light-2311-nebelung -i /belle/collection/MC/MC15rd_taupair_exp20_bucket26_v1
+      gbasf2 Steering_Scripts/Ds2D0e-Reconstruction.py -p Ds_062324_uubar -s light-2311-nebelung -i /belle/collection/MC/MC15rd_uubar_exp20_bucket26_v1
+ 
+      Use: gb2_job_reschedule -p <Project_Name>
+
+Download (Not really used since the laptop must be open):
+      gb2_ds_get Ds_062324_ccbar
+      gb2_ds_get Ds_062324_charged
+      gb2_ds_get Ds_062324_ddbar
+      gb2_ds_get Ds_062324_mixed  
+      gb2_ds_get Ds_062324_ssbar
+      gb2_ds_get Ds_062324_uubar
+      gb2_ds_get Ds_062324_taupair
+
+Merge ROOT files:
+      Background:
+            hadd -f C03-Grid/Completed/Ds2D0e-Generic_Ds_080824_1_ccbar.root Ds_080824_1_ccbar/sub00/*.root
+
+            hadd -f Grid/Completed/Ds2D0e-Generic_Ds_062324_charged.root Ds_062324_charged/sub00/*.root
+            hadd -f Grid/Completed/Ds2D0e-Generic_Ds_062324_ddbar.root Ds_062324_ddbar/sub00/*.root
+            hadd -f Grid/Completed/Ds2D0e-Generic_Ds_062324_mixed.root Ds_062324_mixed/sub00/*.root
+            hadd -f Grid/Completed/Ds2D0e-Generic_Ds_062324_ssbar.root Ds_062324_ssbar/sub00/*.root
+            hadd -f Grid/Completed/Ds2D0e-Generic_Ds_062324_uubar.root Ds_062324_uubar/sub00/*.root
+            hadd -f Grid/Completed/Ds2D0e-Generic_Ds_062324_taupair.root Ds_062324_taupair/sub00/*.root
+
+      Signal:
+            hadd -f C01-Simulated_Events/Ds2D0enu-Signal.root Dsp_072924_Signal/sub00/*.root Dsm_072924_Signal/sub00/*.root
+
+Check Completion:
+      cd /home/belle2/amubarak/Ds_072424_ccbar/sub00/
+            ls -1|wc -l
+
+Offline Downloading:
+      Background:
+      (nohup gb2_ds_get --force --new Ds_080824_1_ccbar) > C03-Grid/Terminal_Output/Ds_080824_1_ccbar.out &
+            [1] 171732
+            nohup: ignoring input and redirecting stderr to stdout
+      Signal:
+            D_s+
+            (nohup gb2_ds_get --force --new Dsp_072924_Signal) > C03-Grid/Terminal_Output/Dsp_072924_Signal.out &
+                  [2] 252182
+                  nohup: ignoring input and redirecting stderr to stdout
+            D_s-
+            (nohup gb2_ds_get --force --new Dsm_072924_Signal) > C03-Grid/Terminal_Output/Dsm_072924_Signal.out &
+                  [3] 278997
+                  nohup: ignoring input and redirecting stderr to stdout
+
+Deletion:
+      gb2_ds_rm Ds_080924_0_ccbar
+      gb2_job_delete -p Dsp_081524_3_Signal Dsm_081524_3_Signal Ds_081524_3_ccbar -f

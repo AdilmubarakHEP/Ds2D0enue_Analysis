@@ -1,0 +1,253 @@
+D*0 Category
+==============================================================================================================
+ma.fillSignalSideParticleList(outputListName='D0:sig',
+                              decayString='D_s+ -> [^D0:kpi -> K- pi+ ] e+:corrected ?nu',
+                              path=roe_path)
+
+# D*0 Veto
+#-------------------------------------------------------------------------------------------
+# Reconstruct pi0-> gamma gamma
+#-----------------------------------------------------
+ma.reconstructDecay(decayString='pi0:2photonsgc -> gamma:roe gamma:v0_roe',
+                    cut='',
+                    chargeConjugation=ChargeC,
+                    path=roe_path)
+ma.applyCuts('pi0:2photonsgc', pi0_Cut, path=roe_path)
+ma.reconstructDecay(decayString='pi0:2photonscc -> gamma:v0_roe gamma:v0_roe',
+                    cut='',
+                    chargeConjugation=ChargeC,
+                    path=roe_path)
+ma.applyCuts('pi0:2photonscc', pi0_Cut, path=roe_path)
+#-----------------------------------------------------
+# Reconstruct D*0:veto -> D0:sig X
+#-----------------------------------------------------
+ma.reconstructDecay(decayString='D*0:Ch1 -> D0:sig pi0:2photonsgc', 
+                    cut='',
+                    chargeConjugation=ChargeC,
+                    path=roe_path)
+ma.reconstructDecay(decayString='D*0:Ch2 -> D0:sig pi0:2photonscc', 
+                    cut='',
+                    chargeConjugation=ChargeC,
+                    path=roe_path)
+ma.reconstructDecay(decayString='D*0:Ch3 -> D0:sig gamma:v0_roe',
+                    cut='',
+                    chargeConjugation=ChargeC,
+                    path=roe_path)
+ma.copyLists(outputListName='D*0:veto',
+             inputListNames=['D*0:Ch1','D*0:Ch2','D*0:Ch3'],
+             path=roe_path)
+ma.applyCuts("D*0:veto", Dstar0_Cut, path=roe_path)
+#-------------------------------------------------------------------------------------------
+
+ma.matchMCTruth(list_name='D*0:veto', path=roe_path)
+
+# D*0
+vm.addAlias("Dstar0_abs_dM", "formula(abs(M - 2.04))")
+ma.rankByLowest(particleList="D*0:veto", 
+                 variable="Dstar0_abs_dM", 
+                 numBest=1, 
+                 path=roe_path)
+
+# D*0:veto Dictionary
+Dstar0_dict = {'M': 'Dstar0veto_M',
+               'dM': 'Dstar0veto_dM',
+               'nDaughterPhotons':'Dstar0veto_nDaughterPhotons',
+               'E': 'Dstar0veto_E',
+               'daughterAngle(0,1)':'Dstar0veto_daughterAngle',
+               'mcPDG':'Dstar0veto_mcPDG',
+               'mcErrors':'Dstar0veto_mcErrors',
+               'genMotherPDG':'Dstar0veto_genMotherPDG',
+               'nMCDaughters':'Dstar0veto_nMCDaughters',
+               'useRestFrame(daughterDiffOf(0, 1, p))':'Dstar0veto_useRestFrame_daughterDiffOf_0_1_p',
+               'useRestFrame(daughterMotherDiffOf(0, p))':'Dstar0veto_useRestFrame_daughterMotherDiffOf_0_p',
+               'useRestFrame(daughterMotherDiffOf(1, p))':'Dstar0veto_useRestFrame_daughterMotherDiffOf_1_p',
+               'useRestFrame(daughterMotherDiffOf(0, pt))':'Dstar0veto_useRestFrame_daughterMotherDiffOf_0_pt',
+               'useRestFrame(daughterMotherDiffOf(1, pt))':'Dstar0veto_useRestFrame_daughterMotherDiffOf_1_pt',
+               'daughterAngle(0,1)':'Dstar0veto_daughterAngle',
+               'decayAngle(0)':'Dstar0veto_decayAngle_0',
+               'decayAngle(1)':'Dstar0veto_decayAngle_1',
+               'cosHelicityAngle(0,1)':'Dstar0veto_cosHelicityAngle',
+               'cosAcoplanarityAngle(0,1)':'Dstar0veto_cosAcoplanarityAngle_0_1',
+               'acoplanarityAngle':'Dstar0veto_acoplanarityAngle',
+               'psi':'Dstar0veto_psi'
+               }
+ma.variableToSignalSideExtraInfo(particleList='D*0:veto', varToExtraInfo=Dstar0_dict, path=roe_path)
+
+
+Dstar0_ROE = []
+for key in Dstar0_dict:
+    vm.addAlias(Dstar0_dict[key], "extraInfo("+ Dstar0_dict[key] +")")
+    Dstar0_ROE.append(Dstar0_dict[key])
+
+vm.addAlias('Dstar0veto_M_Correction', 'ifNANgiveX(Dstar0veto_M,10)')
+Dstar0_ROE.append('Dstar0veto_M_Correction')
+==============================================================================================================
+
+Other
+==============================================================================================================
+# Reconstruct pi0:veto -> e+:sig e-:roe gamma:roe
+#--------------------------------------------------
+# make combinations of signal electron candidates with all electron from ROE and gamma
+ma.reconstructDecay(decayString='pi0:veto -> e+:sig e-:roe gamma:roe',
+                    cut='',
+                    chargeConjugation=ChargeC,
+                    path=roe_path)
+ma.applyCuts('pi0:veto', pi0_Cut, path=roe_path)
+
+ma.reconstructDecay(decayString='vpho:veto -> gamma:roe e+:sig', 
+                    cut='',
+                    path=roe_path,
+                    allowChargeViolation=True)  # neutral and charged '0+' and '0-'
+
+ma.matchMCTruth(list_name='pi0:veto', path=roe_path)
+
+ma.rankByLowest(particleList='pi0:veto',
+                variable='abs(dM)',
+                numBest=1,
+                path=roe_path)
+
+# pi0 Dictionary
+pi0_dict = {'M': 'pi0veto_M',
+            'useAlternativeDaughterHypothesis(M, 0:pi+)':'pi0veto_M_pie',
+            'useAlternativeDaughterHypothesis(M, 1:pi+)':'pi0veto_M_epi',
+            'useAlternativeDaughterHypothesis(M, 0:pi+, 1:pi+)':'pi0veto_M_pipi',
+            'dM': 'pi0veto_dM',
+            'E': 'pi0veto_E',
+            'daughterAngle(0,1)':'pi0veto_daughterAngle',
+            'mcPDG':'pi0veto_mcPDG',
+            'mcErrors':'pi0veto_mcErrors',
+            'genMotherPDG':'pi0veto_genMotherPDG',
+            'nMCDaughters':'pi0veto_nMCDaughters',
+            'nDaughterPhotons':'pi0veto_nDaughterPhotons',
+            'genNMissingDaughter(11)':'pi0veto_genNMissingDaughter_11',
+            'genNMissingDaughter(22)':'pi0veto_genNMissingDaughter_22',
+            }
+ma.variableToSignalSideExtraInfo(particleList='pi0:veto', varToExtraInfo=pi0_dict, path=roe_path)
+# vpho:veto Dictionary
+vpho_dict = {'M': 'vpho_M',
+             'daughter(0,E)':'vpho_gamma_E',
+             'daughter(1,p)':'vpho_e_p',
+            }
+ma.variableToSignalSideExtraInfo(particleList='vpho:veto', varToExtraInfo=vpho_dict, path=roe_path)
+
+pi0_ROE = []
+for key in pi0_dict:
+    vm.addAlias(pi0_dict[key], "extraInfo("+ pi0_dict[key] +")")
+    pi0_ROE.append(pi0_dict[key])
+
+vpho_ROE = []
+for key in vpho_dict:
+    vm.addAlias(vpho_dict[key], "extraInfo("+ vpho_dict[key] +")")
+    vpho_ROE.append(vpho_dict[key])
+
+vm.addAlias('pi0veto_M_Correction', 'ifNANgiveX(pi0veto_M,10)')
+pi0_ROE.append('pi0veto_M_Correction')
+
+vm.addAlias('vpho_M_Correction', 'ifNANgiveX(vpho_M,10)')
+vpho_ROE.append('vpho_M_Correction')
+==============================================================================================================
+
+GammaROE_Cut = 'isInRestOfEvent == 1' # No Energy cut (E >= 0.05)
+
+# Gamma
+# Creates gamma Particle List (and c.c.)
+ma.fillParticleList("gamma:roe", 
+                    cut=GammaROE_Cut,
+                    path=roe_path)
+
+Unused Variable
+==============================================================================================================
+              'useAlternativeDaughterHypothesis(M, 0:pi+)':'gammaveto_M_pie',
+              'useAlternativeDaughterHypothesis(M, 1:e+)':'gammaveto_M_ee',
+              'useAlternativeDaughterHypothesis(M, 1:pi+)':'gammaveto_M_epi',
+              'useAlternativeDaughterHypothesis(M, 0:pi+, 1:pi+)':'gammaveto_M_pipi',
+
+              'useAlternativeDaughterHypothesis(M, 0:pi+)':'gammaV0_M_pie',
+              'useAlternativeDaughterHypothesis(M, 1:pi+)':'gammaV0_M_epi',
+              'useAlternativeDaughterHypothesis(M, 0:pi+, 1:pi+)':'gammaV0_M_pipi',
+==============================================================================================================
+
+Converted Photons
+==============================================================================================================
+# V0 Finder
+#----------------------------------
+ma.fillConvertedPhotonsList(decayString='gamma:converted -> e+ e-',
+                            cut='', 
+                            path=roe_path)
+#
+# Vertex Fitting gamma:v0_roe
+#----------------------------------
+vx.treeFit('gamma:converted', 
+           conf_level=-1,
+           updateAllDaughters=True, 
+           path=roe_path)
+ma.applyCuts('gamma:converted', '', path=roe_path)
+
+# Gamma:converted Dictionary
+gammaV0_dict = {'M': 'gammaV0_M',
+              'convertedPhotonInvariantMass(0, 1)':'gammaV0_ConvertM',
+              'distance':'gammaV0_distance',
+              'mcDecayVertexFromIPDistance':'gammaV0_mcDecayVertexFromIPDistance',
+              'flightDistance':'gammaV0_flightDistance',
+              'nDaughterPhotons':'gammaV0_nDaughterPhotons',
+              'E': 'gammaV0_E',
+              'daughterAngle(0,1)':'gammaV0_daughterAngle',
+              'decayAngle(0)':'gammaV0_decayAngle_0',
+              'decayAngle(1)':'gammaV0_decayAngle_1',
+              'isOrHasCloneTrack':'gammaV0_isOrHasCloneTrack',
+              'isSignal':'gammaV0_isSignal',
+              'isSignalAcceptMissing':'gammaV0_isSignalAcceptMissing',
+              'isSignalAcceptWrongFSPs':'gammaV0_isSignalAcceptWrongFSPs',
+              'mcPDG':'gammaV0_mcPDG',
+              'genMotherPDG':'gammaV0_genMotherPDG',
+              'genMotherPDG(1)':'gammaV0_genMotherPDG_1',
+              'genMotherPDG(2)':'gammaV0_genMotherPDG_2',
+              'nMCDaughters':'gammaV0_nMCDaughters',
+              'mcErrors':'gammaV0_mcErrors',
+              'daughter(0,p)':'gammaV0_ep_p',
+              'daughter(0,pt)':'gammaV0_ep_pt',
+              'daughter(0,mcPDG)':'gammaV0_ep_mcPDG',
+              'daughter(0,genMotherPDG)':'gammaV0_ep_genMotherPDG',
+              'daughter(0,mcMother(E))':'gammaV0_ep_mcMother_E',
+              'daughter(0,isDescendantOfList(gamma:v0_roe,1))':'gammaV0_ep_isDescendantOfList',
+              'daughter(0,sourceObjectIsInList(e+:sig))':'gammaV0_ep_sourceObjectIsInList',
+              'daughter(1,electronID)':'gammaV0_em_electronID',
+              'daughter(1,pionID)':'gammaV0_em_pionID',
+              'daughter(1,d0)':'gammaV0_em_d0',
+              'daughter(1,z0)':'gammaV0_em_z0',
+              'daughter(1,pValue)':'gammaV0_em_pValue',
+              'daughter(1,firstCDCLayer)':'gammaV0_em_firstCDCLayer',
+              'daughter(1,firstPXDLayer)':'gammaV0_em_firstPXDLayer',
+              'daughter(1,firstSVDLayer)':'gammaV0_em_firstSVDLayer',
+              'daughter(1,trackLength)':'gammaV0_em_trackLength',
+              'daughter(1,p)':'gammaV0_em_p',
+              'daughter(1,pt)':'gammaV0_em_pt',
+              'daughter(1,mcPDG)':'gammaV0_em_mcPDG',
+              'daughter(1,genMotherPDG)':'gammaV0_em_genMotherPDG',
+              'daughter(1,mcSecPhysProc)':'gammaV0_em_mcSecPhysProc',
+              'daughter(1,isDescendantOfList(gamma:v0_roe,1))':'gammaV0_em_isDescendantOfList',
+              'daughter(1,sourceObjectIsInList(e-:roe))':'gammaV0_em_sourceObjectIsInList',
+              'pointangle':'gammaV0_pointangle',
+              'chiProb':'gammaV0_chiProb',
+              'openangle':'gammaV0_openangle',
+              'phi_diff':'gammaV0_phi_diff',
+              'theta_diff':'gammaV0_theta_diff',
+              'psi':'gammaV0_psi',
+              'genNMissingDaughter(11)':'gammaV0_genNMissingDaughter_11',
+              'genNMissingDaughter(22)':'gammaV0_genNMissingDaughter_22',
+              }
+ma.variableToSignalSideExtraInfo(particleList='gamma:converted', 
+                                 varToExtraInfo=gammaV0_dict, 
+                                 path=roe_path)
+
+                                 gammaV0_ROE = []
+gammaV0 = []
+for key in gammaV0_dict:
+    vm.addAlias(gammaV0_dict[key], "extraInfo("+ gammaV0_dict[key] +")")
+    gammaV0_ROE.append(gammaV0_dict[key])
+    gammaV0.append(key)
+
+vm.addAlias('gammaV0_M_Correction', 'ifNANgiveX(gammaV0_M,10)')
+gammaV0_ROE.append('gammaV0_M_Correction')
+gammaV0.append('ifNANgiveX(M,10)')
+==============================================================================================================
