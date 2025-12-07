@@ -156,8 +156,8 @@ K_Ch2_nMCMatches
 K_Ch2_mcPrimary
 K_Ch2_isSignal
 K_Ch2_ifNANgiveX_isSignal_5
-K_Ch2_mcPDG
-K_Ch2_genMotherPDG
+pi_Ch1_mcPDG
+pi_Ch1_genMotherPDG
 K_Ch2_genMotherID
 K_Ch2_mcErrors
 K_Ch2_mcMatchWeight
