@@ -637,6 +637,7 @@ def Rest_of_Event_Ch(main_path, roe_path_Ch, ChargeC, ElectronROE_Cut, PionROE_C
                 'daughter(1,genMotherPDG)':'gammaveto_em_genMotherPDG',
                 'daughter(1,mcSecPhysProc)':'gammaveto_em_mcSecPhysProc',
                 'daughter(1,binaryPID(11,211))':'gammaveto_em_binaryPID',
+                'cosHelicityAngleMomentumPi0Dalitz':'gammaveto_cosHelicityAngleMomentumPi0Dalitz',
                 'pointangle':'gammaveto_pointangle',
                 'chiProb':'gammaveto_chiProb',
                 'openangle':'gammaveto_openangle',
@@ -944,6 +945,7 @@ def Reconstruction_Variable(
         D0_kmpippi0_vars += vc.dalitz_3body
         D0_kmpippi0_vars += vu.create_aliases_for_selected(
             ["M","dM","useCMSFrame(E)","useCMSFrame(p)","cosAngleBetweenMomentumAndVertexVector",
+             "cosHelicityAngleMomentumPi0Dalitz","momentaTripleProduct(0, 1, 2)",
              "chiProb","cos(theta)","decayAngle(0)","cos(decayAngle(0))","decayAngle(1)","cos(decayAngle(1))",
              "flightDistance","isSignal",'ifNANgiveX(isSignal,0)',"nMCDaughters",
              "passesCut(abs(D0_kmpippi0_nMCDaughters)==2)","passesCut(abs(D0_kmpippi0_nMCDaughters)==3)",
@@ -1058,40 +1060,41 @@ def Reconstruction_Variable(
     if mode == "kmpip":
         km_vars  = vu.create_aliases_for_selected(
             ['kaonID','nSVDHits','nCDCHits','abs(dr)','abs(dz)','z0','d0','pValue','chi2','ndf','theta','phi','omega']
-            + var_1 + tracks + truth,
+            + var_1 + tracks + truth + ['mcMother(nMCDaughters)','genMotherPDG(1)','genMotherPDG(2)'],
             decay_string='D_s+ -> [D0:kmpip -> ^K-:loose pi+:loose] e+:corrected ?nu', 
             prefix=['K_Ch1'])
         pip_vars = vu.create_aliases_for_selected(
             ['pionID','nSVDHits','nCDCHits','abs(dr)','abs(dz)','z0','d0','pValue','chi2','ndf','theta','phi','omega']
-            + var_1 + tracks + truth,
+            + var_1 + tracks + truth + ['mcMother(nMCDaughters)','genMotherPDG(1)','genMotherPDG(2)'],
             'D_s+ -> [D0:kmpip -> K-:loose ^pi+:loose] e+:corrected ?nu', 
             prefix=['pi_Ch1'])
 
     if mode == "kmpippi0":
         km_vars  = vu.create_aliases_for_selected(
             ['kaonID','nSVDHits','nCDCHits','abs(dr)','abs(dz)','z0','d0','pValue','chi2','ndf','theta','phi','omega']
-            + var_1 + tracks + truth,
+            + var_1 + tracks + truth + ['mcMother(nMCDaughters)','genMotherPDG(1)','genMotherPDG(2)'],
             decay_string=f'D_s+ -> [D0:kmpippi0 -> ^K-:loose pi+:loose pi0:{pi0_list}] e+:corrected ?nu', 
             prefix=['K_Ch2'])
         pip_vars = vu.create_aliases_for_selected(
             ['pionID','nSVDHits','nCDCHits','abs(dr)','abs(dz)','z0','d0','pValue','chi2','ndf','theta','phi','omega']
-            + var_1 + tracks + truth,
+            + var_1 + tracks + truth + ['mcMother(nMCDaughters)','genMotherPDG(1)','genMotherPDG(2)'],
             decay_string=f'D_s+ -> [D0:kmpippi0 -> K-:loose ^pi+:loose pi0:{pi0_list}] e+:corrected ?nu', 
             prefix=['pi_Ch2'])
         pi0_vars = vu.create_aliases_for_selected(
-            ["M","InvM","E","E1","E2","max(E1, E2)","energyAsymmetry"] + var_1 + truth,
+            ["M","InvM","E","E1","E2","max(E1, E2)","energyAsymmetry"] 
+            + var_1 + truth + ['mcMother(nMCDaughters)','genMotherPDG(1)','genMotherPDG(2)'],
             decay_string=f'D_s+ -> [D0:kmpippi0 -> K-:loose pi+:loose ^pi0:{pi0_list}] e+:corrected ?nu', 
             prefix=['pi0_Ch2'])
 
     if mode == "km3pi":
         km_vars  = vu.create_aliases_for_selected(
             ['kaonID','nSVDHits','nCDCHits','abs(dr)','abs(dz)','z0','d0','pValue','chi2','ndf','theta','phi','omega']
-            + var_1 + tracks + truth,
+            + var_1 + tracks + truth + ['mcMother(nMCDaughters)','genMotherPDG(1)','genMotherPDG(2)'],
             decay_string='D_s+ -> [D0:km3pi -> ^K-:loose pi+:loose pi-:loose pi+:loose] e+:corrected ?nu', 
             prefix=['K_Ch3'])
         pip_vars = vu.create_aliases_for_selected(
             ['pionID','nSVDHits','nCDCHits','abs(dr)','abs(dz)','z0','d0','pValue','chi2','ndf','theta','phi','omega']
-            + var_1 + tracks + truth,
+            + var_1 + tracks + truth + ['mcMother(nMCDaughters)','genMotherPDG(1)','genMotherPDG(2)'],
             decay_string='D_s+ -> [D0:km3pi -> K-:loose ^pi+:loose ^pi-:loose ^pi+:loose] e+:corrected ?nu',
             prefix=['pi1_Ch3','pi2_Ch3','pi3_Ch3'])
 
@@ -1100,7 +1103,14 @@ def Reconstruction_Variable(
     vm.addAlias('MomentumAsymmetry', 'formula((p1 - p2) / (p1 + p2))')
     vm.addAlias("charged_product", "formula(daughter(0,charge)*daughter(1,charge))")
     vm.addAlias("D0orD0bar", "passesCut(daughter(0,charge)==-1 and daughter(1,charge)==1)")
-    D0_vars = vu.create_aliases_for_selected(
+    D0_vars=[]
+    if mode == "kmpippi0":
+        D0_vars = vu.create_aliases_for_selected(
+            list_of_variables=["cosHelicityAngleMomentumPi0Dalitz","momentaTripleProduct(0, 1, 2)",],
+            decay_string='D_s+ -> ^D0 e+:corrected ?nu',
+            prefix=['D0'])
+
+    D0_vars += vu.create_aliases_for_selected(
         list_of_variables=vc.dalitz_3body +
                           ["charged_product","MomentumAsymmetry",
                            "useCMSFrame(E)","useCMSFrame(p)",

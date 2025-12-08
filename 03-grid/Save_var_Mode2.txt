@@ -156,11 +156,14 @@ K_Ch2_nMCMatches
 K_Ch2_mcPrimary
 K_Ch2_isSignal
 K_Ch2_ifNANgiveX_isSignal_5
-pi_Ch1_mcPDG
-pi_Ch1_genMotherPDG
+K_Ch2_mcPDG
+K_Ch2_genMotherPDG
 K_Ch2_genMotherID
 K_Ch2_mcErrors
 K_Ch2_mcMatchWeight
+K_Ch2_mcMother_nMCDaughters
+K_Ch2_genMotherPDG_1
+K_Ch2_genMotherPDG_2
 pi_Ch2_pionID
 pi_Ch2_nSVDHits
 pi_Ch2_nCDCHits
@@ -213,6 +216,9 @@ pi_Ch2_genMotherPDG
 pi_Ch2_genMotherID
 pi_Ch2_mcErrors
 pi_Ch2_mcMatchWeight
+pi_Ch2_mcMother_nMCDaughters
+pi_Ch2_genMotherPDG_1
+pi_Ch2_genMotherPDG_2
 pi0_Ch2_M
 pi0_Ch2_InvM
 pi0_Ch2_E
@@ -243,6 +249,11 @@ pi0_Ch2_genMotherPDG
 pi0_Ch2_genMotherID
 pi0_Ch2_mcErrors
 pi0_Ch2_mcMatchWeight
+pi0_Ch2_mcMother_nMCDaughters
+pi0_Ch2_genMotherPDG_1
+pi0_Ch2_genMotherPDG_2
+D0_cosHelicityAngleMomentumPi0Dalitz
+D0_momentaTripleProduct_0_1_2
 D0_daughterInvM_0_1
 D0_daughterInvM_0_2
 D0_daughterInvM_1_2
@@ -492,6 +503,7 @@ gammaveto_em_mcPDG
 gammaveto_em_genMotherPDG
 gammaveto_em_mcSecPhysProc
 gammaveto_em_binaryPID
+gammaveto_cosHelicityAngleMomentumPi0Dalitz
 gammaveto_pointangle
 gammaveto_chiProb
 gammaveto_openangle
