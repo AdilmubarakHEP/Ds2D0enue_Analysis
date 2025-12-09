@@ -4,11 +4,18 @@
   "pi0_lists": [
     "eff20_May2020"
   ],
+  "control_samples": {
+    "signal": true,
+    "no_electron_id": false,
+    "wrong_charge": false,
+    "both": false
+  },
   "scheduler_port": 9882,
   "workers": 1000,
   "_comment_date": "Date format: DDMMYY (e.g., 011225 = December 1, 2025)",
   "_comment_attempt": "Attempt number for reruns",
   "_comment_pi0_lists": "Which pi0 lists to process for kmpippi0 mode",
+  "_comment_control_samples": "Enable/disable control samples: signal (standard), no_electron_id (fake rate), wrong_charge (D*0 bkg), both (combined)",
   "_comment_scheduler_port": "Port for b2luigi online scheduler (default: 8082)",
   "_comment_workers": "Number of concurrent batch jobs (default: 50)"
 }

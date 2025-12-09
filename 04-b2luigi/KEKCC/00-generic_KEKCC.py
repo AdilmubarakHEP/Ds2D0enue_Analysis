@@ -46,6 +46,7 @@ M_KM3PI = "km3pi"
 
 # Global, filled after reading settings.json
 SELECTED_PI0_LISTS: List[str] = []
+ENABLED_CONTROL_SAMPLES: dict = {}
 
 DEFAULT_BATCH_SYSTEM = os.environ.get("B2L_BATCH", "lsf").strip().lower()
 
@@ -77,7 +78,51 @@ def load_settings(path: str) -> dict:
         raise ValueError("settings.json must contain 'date' and 'attempt'")
     if "pi0_lists" not in cfg:
         raise ValueError("settings.json must contain 'pi0_lists'")
+    # Default control samples: signal only
+    if "control_samples" not in cfg:
+        cfg["control_samples"] = {"signal": True, "no_electron_id": False, "wrong_charge": False, "both": False}
     return cfg
+
+
+def control_sample_flags(sample_type: str) -> Tuple[bool, bool]:
+    """
+    Convert sample_type string to (no_electron_id, wrong_charge) flags.
+
+    Args:
+        sample_type: one of "signal", "no_electron_id", "wrong_charge", "both"
+
+    Returns:
+        Tuple of (no_electron_id, wrong_charge) booleans
+    """
+    if sample_type == "signal":
+        return (False, False)
+    elif sample_type == "no_electron_id":
+        return (True, False)
+    elif sample_type == "wrong_charge":
+        return (False, True)
+    elif sample_type == "both":
+        return (True, True)
+    else:
+        raise ValueError(f"Unknown sample_type: {sample_type}")
+
+
+def control_sample_suffix(sample_type: str) -> str:
+    """
+    Get output filename suffix for a given sample type.
+
+    Returns:
+        String suffix like "" (signal), "_CS_noEID", "_CS_wrongCharge", "_CS_noEID_wrongCharge"
+    """
+    if sample_type == "signal":
+        return ""
+    elif sample_type == "no_electron_id":
+        return "_CS_noEID"
+    elif sample_type == "wrong_charge":
+        return "_CS_wrongCharge"
+    elif sample_type == "both":
+        return "_CS_noEID_wrongCharge"
+    else:
+        raise ValueError(f"Unknown sample_type: {sample_type}")
 
 # ============================================================
 # Helpers
@@ -94,29 +139,34 @@ def sample_subdir(infile: str) -> str:
 
 def chunk_output_path(date: str, attempt: str, mode: str,
                       sample: str, subdir: str, index: int,
-                      pi0: Optional[str]) -> str:
+                      pi0: Optional[str], sample_type: str = "signal") -> str:
     """
     /group/belle2/users2022/amubarak/temp_<date>_<attempt>/
-        <sample>_<mode>[/<pi0_list>]/<subdir>/ntuple_<index>.root
+        <sample>_<mode>[_<pi0_list>][_CS_suffix]/<subdir>/ntuple_<index>.root
     """
     temp_root = os.path.join(TEMP_BASE, f"temp_{date}_{attempt}")
     base_name = f"{sample}_{mode}"
     if mode == M_KMPIPPI0 and pi0:
         base_name = f"{sample}_{mode}_{pi0}"
+    # Add control sample suffix
+    cs_suffix = control_sample_suffix(sample_type)
+    if cs_suffix:
+        base_name = base_name + cs_suffix
     out_dir = os.path.join(temp_root, base_name, subdir)
     return os.path.join(out_dir, f"ntuple_{index}.root")
 
 
 def merged_output_path(date: str, attempt: str, mode: str,
-                       sample: str, pi0: Optional[str]) -> str:
+                       sample: str, pi0: Optional[str], sample_type: str = "signal") -> str:
     """
     /group/belle/users/amubarak/03-KEKCC/
-        Ds2D0e-Generic_Ds_<date>_<attempt>_<sample>_<mode>[_<pi0>].root
+        Ds2D0e-Generic_Ds_<date>_<attempt>_<sample>_<mode>[_<pi0>][_CS_suffix].root
     """
+    cs_suffix = control_sample_suffix(sample_type)
     if mode == M_KMPIPPI0 and pi0:
-        name = f"Ds2D0e-Generic_Ds_{date}_{attempt}_{sample}_{mode}_{pi0}.root"
+        name = f"Ds2D0e-Generic_Ds_{date}_{attempt}_{sample}_{mode}_{pi0}{cs_suffix}.root"
     else:
-        name = f"Ds2D0e-Generic_Ds_{date}_{attempt}_{sample}_{mode}.root"
+        name = f"Ds2D0e-Generic_Ds_{date}_{attempt}_{sample}_{mode}{cs_suffix}.root"
     return os.path.join(MERGE_ROOT, name)
 
 
@@ -208,6 +258,7 @@ class DsChunkTask(Basf2PathTask):
     attempt = b2luigi.Parameter()
     mode = b2luigi.Parameter()      # "kmpip", "kmpippi0", "km3pi"
     pi0 = b2luigi.Parameter(default="", significant=True)
+    sample_type = b2luigi.Parameter(default="signal")  # "signal", "no_electron_id", "wrong_charge", "both"
 
     batch_system = DEFAULT_BATCH_SYSTEM
     queue = "l"
@@ -217,10 +268,10 @@ class DsChunkTask(Basf2PathTask):
     def log_dir(self) -> str:
         """
         Base log directory:
-        logs/<date>_<attempt>/<mode>/<sample>[/<pi0_list>]/<subdir>
+        logs/<date>_<attempt>/<sample_type>/<mode>/<sample>[/<pi0_list>]/<subdir>
         b2luigi will append parameter subfolders and TaskName under this.
         """
-        base = os.path.join(LOG_ROOT, f"{self.date}_{self.attempt}", self.mode, self.sample)
+        base = os.path.join(LOG_ROOT, f"{self.date}_{self.attempt}", self.sample_type, self.mode, self.sample)
         if self.mode == M_KMPIPPI0 and self.pi0:
             base = os.path.join(base, self.pi0)
         return os.path.join(base, self.subdir)
@@ -234,6 +285,7 @@ class DsChunkTask(Basf2PathTask):
             self.date, self.attempt, self.mode,
             self.sample, self.subdir, self.index,
             (self.pi0 or None),
+            sample_type=self.sample_type,
         )
 
     def output(self):
@@ -249,6 +301,9 @@ class DsChunkTask(Basf2PathTask):
             # Steering default for non pi0 modes
             pi0_list = "eff50_May2020"
 
+        # Get control sample flags
+        no_electron_id, wrong_charge = control_sample_flags(self.sample_type)
+
         return create_reconstruction_path(
             mode=self.mode,
             infile=self.infile,
@@ -256,6 +311,8 @@ class DsChunkTask(Basf2PathTask):
             pi0_list=pi0_list,
             truth=False,
             data=False,
+            no_electron_id=no_electron_id,
+            wrong_charge=wrong_charge,
         )
 
 
@@ -265,18 +322,19 @@ class DsMergeTask(b2luigi.Task):
     attempt = b2luigi.Parameter()
     mode = b2luigi.Parameter()
     pi0 = b2luigi.Parameter(default="", significant=True)
+    sample_type = b2luigi.Parameter(default="signal")
 
     @property
     def log_dir(self) -> str:
-        # logs/<date>_<attempt>/merge/<mode>/<sample>
-        return os.path.join(LOG_ROOT, f"{self.date}_{self.attempt}", "merge", self.mode, self.sample)
+        # logs/<date>_<attempt>/merge/<sample_type>/<mode>/<sample>
+        return os.path.join(LOG_ROOT, f"{self.date}_{self.attempt}", "merge", self.sample_type, self.mode, self.sample)
 
     def get_log_file_dir(self) -> str:
         return self.log_dir
 
     @property
     def out_root(self) -> str:
-        return merged_output_path(self.date, self.attempt, self.mode, self.sample, (self.pi0 or None))
+        return merged_output_path(self.date, self.attempt, self.mode, self.sample, (self.pi0 or None), sample_type=self.sample_type)
 
     def requires(self):
         mdsts = discover_mdsts(self.sample)
@@ -290,6 +348,7 @@ class DsMergeTask(b2luigi.Task):
                 attempt=self.attempt,
                 mode=self.mode,
                 pi0=self.pi0,
+                sample_type=self.sample_type,
             )
 
     def output(self):
@@ -301,6 +360,10 @@ class DsMergeTask(b2luigi.Task):
         base_name = f"{self.sample}_{self.mode}"
         if self.mode == M_KMPIPPI0 and self.pi0:
             base_name = f"{self.sample}_{self.mode}_{self.pi0}"
+        # Add control sample suffix
+        cs_suffix = control_sample_suffix(self.sample_type)
+        if cs_suffix:
+            base_name = base_name + cs_suffix
         base_dir = os.path.join(temp_root, base_name)
 
         # any subdir (sub00, sub01, ...)
@@ -346,19 +409,27 @@ class DsCampaign(b2luigi.WrapperTask):
     attempt = b2luigi.Parameter()
 
     def requires(self):
+        # Get enabled control sample types
+        enabled_types = [st for st, enabled in ENABLED_CONTROL_SAMPLES.items() if enabled]
+        if not enabled_types:
+            logging.warning("No control samples enabled! Defaulting to signal only.")
+            enabled_types = ["signal"]
+
         for s in SAMPLES:
-            # No pi0
-            yield DsMergeTask(sample=s, date=self.date, attempt=self.attempt, mode=M_KMPIP)
-            yield DsMergeTask(sample=s, date=self.date, attempt=self.attempt, mode=M_KM3PI)
-            # With pi0 lists from settings.json
-            for pi0 in SELECTED_PI0_LISTS:
-                yield DsMergeTask(
-                    sample=s,
-                    date=self.date,
-                    attempt=self.attempt,
-                    mode=M_KMPIPPI0,
-                    pi0=pi0,
-                )
+            for sample_type in enabled_types:
+                # No pi0 modes
+                yield DsMergeTask(sample=s, date=self.date, attempt=self.attempt, mode=M_KMPIP, sample_type=sample_type)
+                yield DsMergeTask(sample=s, date=self.date, attempt=self.attempt, mode=M_KM3PI, sample_type=sample_type)
+                # With pi0 lists from settings.json
+                for pi0 in SELECTED_PI0_LISTS:
+                    yield DsMergeTask(
+                        sample=s,
+                        date=self.date,
+                        attempt=self.attempt,
+                        mode=M_KMPIPPI0,
+                        pi0=pi0,
+                        sample_type=sample_type,
+                    )
 
 
 class CleanupLogsTask(b2luigi.Task):
@@ -471,11 +542,18 @@ if __name__ == "__main__":
     date = cfg["date"]
     attempt = cfg["attempt"]
     pi0_lists = cfg.get("pi0_lists", [])
+    control_samples = cfg.get("control_samples", {"signal": True, "no_electron_id": False, "wrong_charge": False, "both": False})
     workers_cfg = int(cfg.get("workers", 50))
     scheduler_port_cfg = int(cfg.get("scheduler_port", 8082))
     scheduler_host_cfg = cfg.get("scheduler_host", "localhost")
 
     SELECTED_PI0_LISTS[:] = list(pi0_lists)
+    ENABLED_CONTROL_SAMPLES.clear()
+    ENABLED_CONTROL_SAMPLES.update(control_samples)
+
+    # Log which control samples are enabled
+    enabled = [k for k, v in ENABLED_CONTROL_SAMPLES.items() if v]
+    logging.info(f"Enabled control samples: {enabled}")
 
     workers = args.workers if args.workers is not None else workers_cfg
 

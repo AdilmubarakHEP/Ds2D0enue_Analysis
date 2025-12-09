@@ -1,12 +1,30 @@
 {
-  "_comment_info": "Configuration for Ds+ -> D0 e+ nu grid analysis",
+  "_comment_info": "Configuration for Ds+ -> D0 e+ nu grid analysis (00-generic_gbasf2.py)",
   "_comment_location": "/home/belle2/amubarak/Ds2D0enue_Analysis/04-b2luigi/gbasf2/settings.json",
-  
+
+  "_comment_run_control": "=== RUN CONTROL ===",
+  "_comment_date_format": "Date format: DDMMYY (e.g., 120725 = July 12, 2025)",
+  "date": "120725",
+  "attempt": "1",
+
+  "_comment_data_or_mc": "=== DATA OR MC TOGGLE ===",
+  "_comment_run_on_data_info": "Set to true for data, false for MC",
+  "run_on_data": false,
+
   "_comment_campaign_selection": "=== MC CAMPAIGN SELECTION ===",
-  "_comment_campaign_toggle": "Set 'mc_campaign' to either 'MC15rd' or 'MC16rd' to choose dataset",
+  "_comment_mc_campaign_toggle": "Set to 'MC15rd' (1444 fb^-1) or 'MC16rd' (215 fb^-1)",
   "mc_campaign": "MC15rd",
-  
-  "_comment_mc15rd_header": "=== MC15rd CAMPAIGN (1444.0 fb^-1) ===",
+
+  "_comment_background_selection": "=== BACKGROUND SELECTION (for MC only) ===",
+  "_comment_background_note_mc15rd": "For MC15rd use: ccbar, BB, ddbar, ssbar, taupair, uubar",
+  "_comment_background_note_mc16rd": "For MC16rd use: ccbar, charged, ddbar, mixed, ssbar, taupair, uubar",
+  "_comment_backgrounds_list": "List all backgrounds to process (or use 'all' to process all available)",
+  "backgrounds_to_run": ["ccbar", "BB", "ddbar", "ssbar", "taupair", "uubar"],
+
+  "_comment_data_collection": "=== DATA COLLECTION (used when run_on_data=true) ===",
+  "data_collection": "/belle/collection/Data/RSC_proc13prompt_4S_skim_17230100_v3",
+
+  "_comment_mc15rd_header": "=== MC15rd CAMPAIGN (1444 fb^-1) ===",
   "MC15rd": {
     "int_luminosity_fb": 1443.999,
     "datasets": {
@@ -18,8 +36,8 @@
       "uubar": "/belle/collection/MC/RSC_MC15rd_4S_uubar_skim_17230100_v3"
     }
   },
-  
-  "_comment_mc16rd_header": "=== MC16rd CAMPAIGN (215.29 fb^-1) ===",
+
+  "_comment_mc16rd_header": "=== MC16rd CAMPAIGN (215 fb^-1) ===",
   "MC16rd": {
     "int_luminosity_fb": 215.28939989827998,
     "datasets": {
@@ -32,39 +50,34 @@
       "uubar": "/belle/collection/MC/MC16rd_proc16_chunk1_uubar_4S_v1"
     }
   },
-  
-  "_comment_run_control": "=== RUN CONTROL ===",
-  "_comment_backgrounds_note": "For MC15rd use: ccbar, BB, ddbar, ssbar, taupair, uubar",
-  "_comment_backgrounds_note2": "For MC16rd use: ccbar, charged, ddbar, mixed, ssbar, taupair, uubar",
-  "_comment_date_format": "Date format: YYMMDD (e.g., 251201 = Dec 1, 2025)",
-  "date": "251201",
-  "attempt": 1,
-  "backgrounds_to_run": ["taupair"],
-  "modes_to_run": ["kmpippi0"],
-  
-  "_comment_reconstruction": "=== RECONSTRUCTION SETTINGS ===",
-  "pi0_list": "eff10_May2020",
-  "basf2_release": "light-2409-toyger",
-  
+
+  "_comment_pi0_lists": "=== PI0 RECONSTRUCTION LISTS ===",
+  "_comment_pi0_lists_info": "Which pi0 lists to process for kmpippi0 mode",
+  "pi0_lists": [
+    "eff20_May2020"
+  ],
+
+  "_comment_control_samples": "=== CONTROL SAMPLES ===",
+  "_comment_control_samples_info": "Enable/disable control samples: signal (standard), no_electron_id (fake rate), wrong_charge (D*0 bkg), both (combined)",
+  "control_samples": {
+    "signal": true,
+    "no_electron_id": false,
+    "wrong_charge": false,
+    "both": false
+  },
+
   "_comment_gbasf2": "=== GBASF2 GRID SETTINGS ===",
-  "_comment_project_naming": "Short template for gbasf2 (b2luigi adds unique hash automatically)",
-  "_comment_project_example": "Example: Ds_tau_kmpippi0 (18 chars) + b2luigi hash (10 chars) = 28 chars",
-  "gbasf2_project_name_template": "Ds_{background}_{mode}",
+  "gbasf2_release": "light-2409-toyger",
   "gbasf2_max_retries": 3,
   "gbasf2_download_logs": false,
-  "gbasf2_cputime": 5,
-  "gbasf2_force_submission": false,
-  
-  "_comment_output": "=== OUTPUT DIRECTORIES ===",
-  "_comment_output_naming": "Merged files include full date and attempt for tracking",
-  "result_dir": "/group/belle/users/amubarak/02-Grid/b2luigi_outputs",
-  "download_dir": "/group/belle/users/amubarak",
-  "merge_output_dir": "/group/belle/users/amubarak/02-Grid/Sample_Grid",
+
+  "_comment_output": "=== OUTPUT SETTINGS ===",
+  "_comment_merge_note": "Merged files go to /group/belle/users/amubarak/03-Grid/",
   "remove_downloads_after_merge": false,
-  "terminal_logs_dir": "/home/belle2/amubarak/C02-Grid/Terminal_Output",
-  
-  "_comment_scheduler": "=== CENTRAL SCHEDULER (Optional Web Monitoring) ===",
-  "use_central_scheduler": false,
-  "central_scheduler_host": "localhost",
-  "central_scheduler_port": 8082
+
+  "_comment_scheduler": "=== CENTRAL SCHEDULER (Web Monitoring) ===",
+  "_comment_scheduler_info": "Port and host for b2luigi online scheduler",
+  "scheduler_host": "localhost",
+  "scheduler_port": 8082,
+  "workers": 10
 }

@@ -134,6 +134,18 @@ def argparser():
         default="",
         help="Output ROOT filename for variablesToNtuple."
     )
+    parser.add_argument(
+        "--no-electron-id",
+        action="store_true",
+        default=False,
+        help="Control sample: Remove electron ID cut (for D*+ peaking background and fake rate study)."
+    )
+    parser.add_argument(
+        "--wrong-charge",
+        action="store_true",
+        default=False,
+        help="Control sample: Flip electron charge (e+ -> e-) to get wrong-sign sample for D*0 background."
+    )
     return parser
 
 def build_truth_mode(mode, path):
@@ -240,9 +252,11 @@ def build_selected_mode(
     ChargeC,
     Pion_Cut, Kaon_Cut, Electron_Cut, Gamma_Cut,
     D0kmpip_Cut, D0kmpippi0_Cut, D0km3pi_Cut,
-    Ds_D0kmpip_Cut, Ds_D0kmpippi0_Cut, Ds_D0km3pi_Cut, 
+    Ds_D0kmpip_Cut, Ds_D0kmpippi0_Cut, Ds_D0km3pi_Cut,
     Ds_star_Cut,
-    is_data=False
+    is_data=False,
+    no_electron_id=False,
+    wrong_charge=False
 ):
     cfg = MODE_CFG[mode]  # uses your d0list, dslist, infile
     d0list = cfg["d0list"]      # e.g. "D0:kmpip"
@@ -285,9 +299,15 @@ def build_selected_mode(
     #-----------------------------
     # Creates Electron Particle List (and c.c.)
     # Cut on Variables: electronID, abs(d0), and abs(z0)
-    ma.fillParticleList("e+:uncorrected", cut='', path=path)
-    if not is_data:
-        ma.fillParticleListFromMC('e+:gen', '', path=path)
+    # For wrong-charge control sample, we use e- instead of e+
+    if wrong_charge:
+        ma.fillParticleList("e-:uncorrected", cut='', path=path)
+        if not is_data:
+            ma.fillParticleListFromMC('e-:gen', '', path=path)
+    else:
+        ma.fillParticleList("e+:uncorrected", cut='', path=path)
+        if not is_data:
+            ma.fillParticleListFromMC('e+:gen', '', path=path)
     #-----------------------------
     # Bremsstrahlung Correction
     #-----------------------------
@@ -299,22 +319,37 @@ def build_selected_mode(
 
     ma.fillParticleList("gamma:brems", "goodGamma", path=path)
 
-    ma.correctBrems(outputList="e+:corrected", 
-                    inputList="e+:uncorrected",
-                    multiplePhotons=True,
-                    gammaList="gamma:brems",
-                    path=path)
+    if wrong_charge:
+        ma.correctBrems(outputList="e-:corrected",
+                        inputList="e-:uncorrected",
+                        multiplePhotons=True,
+                        gammaList="gamma:brems",
+                        path=path)
+    else:
+        ma.correctBrems(outputList="e+:corrected",
+                        inputList="e+:uncorrected",
+                        multiplePhotons=True,
+                        gammaList="gamma:brems",
+                        path=path)
     vm.addAlias("isBremsCorrected", "extraInfo(bremsCorrected)")  # [E30]
 
-    ma.applyCuts('e+:corrected',Electron_Cut, path=path)
+    # Control sample: conditionally apply electron ID cut
+    lepton_list = 'e-:corrected' if wrong_charge else 'e+:corrected'
+    if no_electron_id:
+        # For control sample: skip electron ID, only apply tracking cuts
+        Electron_Cut_CS = 'abs(dr) < 1 and abs(dz) < 3'
+        ma.applyCuts(lepton_list, Electron_Cut_CS, path=path)
+    else:
+        # Standard analysis: apply full electron ID cut
+        ma.applyCuts(lepton_list, Electron_Cut, path=path)
     #-----------------------------
     # Curler
     #-----------------------------
-    ma.tagCurlTracks("e+:corrected", selectorType='mva', ptCut=0.6, mcTruth=True, path=path)
+    ma.tagCurlTracks(lepton_list, selectorType='mva', ptCut=0.6, mcTruth=True, path=path)
     vm.addAlias('isCurl', 'extraInfo(isCurl)')
     vm.addAlias('isTruthCurl', 'extraInfo(isTruthCurl)')
 
-    Electron = ["isBremsCorrected",'isCurl','isTruthCurl']
+    Electron = ["isBremsCorrected", 'isCurl', 'isTruthCurl']
     #/================================================================================================================================/
     # Reconstruct D0 decay
     #------------------------------------
@@ -341,34 +376,40 @@ def build_selected_mode(
     # Ds -> D0 e nu per mode
     #-----------------------------------------
     if mode == "kmpip":
-        ma.reconstructDecay('D_s+:Ch1 -> [D0:kmpip -> K-:loose pi+:loose] e+:corrected ?nu ?addbrems',
-                            cut=Ds_D0kmpip_Cut, chargeConjugation=ChargeC, path=path)
+        ma.reconstructDecay(f'D_s+:Ch1 -> [D0:kmpip -> K-:loose pi+:loose] {lepton_list} ?nu ?addbrems',
+                            cut=Ds_D0kmpip_Cut, chargeConjugation=ChargeC,
+                            allowChargeViolation=wrong_charge, path=path)
         vx.treeFit("D_s+:Ch1", conf_level=0, ipConstraint=True, updateAllDaughters=True, path=path)
         ma.applyCuts("D_s+:Ch1", Ds_D0kmpip_Cut, path=path)
     elif mode == "kmpippi0":
-        ma.reconstructDecay(f'D_s+:Ch2 -> [D0:kmpippi0 -> K-:loose pi+:loose pi0:{pi0_list}] e+:corrected ?nu ?addbrems',
-                            cut=Ds_D0kmpippi0_Cut, chargeConjugation=ChargeC, path=path)
+        ma.reconstructDecay(f'D_s+:Ch2 -> [D0:kmpippi0 -> K-:loose pi+:loose pi0:{pi0_list}] {lepton_list} ?nu ?addbrems',
+                            cut=Ds_D0kmpippi0_Cut, chargeConjugation=ChargeC,
+                            allowChargeViolation=wrong_charge, path=path)
         vx.treeFit("D_s+:Ch2", conf_level=0, ipConstraint=True, updateAllDaughters=True, path=path)
         ma.applyCuts("D_s+:Ch2", Ds_D0kmpippi0_Cut, path=path)
     else:
-        ma.reconstructDecay('D_s+:Ch3 -> [D0:km3pi -> K-:loose pi+:loose pi-:loose pi+:loose] e+:corrected ?nu ?addbrems',
-                            cut=Ds_D0km3pi_Cut, chargeConjugation=ChargeC, path=path)
+        ma.reconstructDecay(f'D_s+:Ch3 -> [D0:km3pi -> K-:loose pi+:loose pi-:loose pi+:loose] {lepton_list} ?nu ?addbrems',
+                            cut=Ds_D0km3pi_Cut, chargeConjugation=ChargeC,
+                            allowChargeViolation=wrong_charge, path=path)
         vx.treeFit("D_s+:Ch3", conf_level=0, ipConstraint=True, updateAllDaughters=True, path=path)
         ma.applyCuts("D_s+:Ch3", Ds_D0km3pi_Cut, path=path)
 
     # Ds* -> Ds gamma per mode
     #-----------------------------------------
     if mode == "kmpip":
-        ma.reconstructDecay('D_s*+:Ch1 -> [D_s+:Ch1 -> [D0:kmpip -> K-:loose pi+:loose] e+:corrected ?nu ?addbrems] gamma:recon',
-                            cut=Ds_star_Cut, chargeConjugation=ChargeC, path=path)
+        ma.reconstructDecay(f'D_s*+:Ch1 -> [D_s+:Ch1 -> [D0:kmpip -> K-:loose pi+:loose] {lepton_list} ?nu ?addbrems] gamma:recon',
+                            cut=Ds_star_Cut, chargeConjugation=ChargeC,
+                            allowChargeViolation=wrong_charge, path=path)
         ma.applyCuts("D_s*+:Ch1", Ds_star_Cut, path=path)
     elif mode == "kmpippi0":
-        ma.reconstructDecay(f'D_s*+:Ch2 -> [D_s+:Ch2 -> [D0:kmpippi0 -> K-:loose pi+:loose pi0:{pi0_list}] e+:corrected ?nu ?addbrems] gamma:recon',
-                            cut=Ds_star_Cut, chargeConjugation=ChargeC, path=path)
+        ma.reconstructDecay(f'D_s*+:Ch2 -> [D_s+:Ch2 -> [D0:kmpippi0 -> K-:loose pi+:loose pi0:{pi0_list}] {lepton_list} ?nu ?addbrems] gamma:recon',
+                            cut=Ds_star_Cut, chargeConjugation=ChargeC,
+                            allowChargeViolation=wrong_charge, path=path)
         ma.applyCuts("D_s*+:Ch2", Ds_star_Cut, path=path)
     else:
-        ma.reconstructDecay('D_s*+:Ch3 -> [D_s+:Ch3 -> [D0:km3pi -> K-:loose pi+:loose pi-:loose pi+:loose] e+:corrected ?nu ?addbrems] gamma:recon',
-                            cut=Ds_star_Cut, chargeConjugation=ChargeC, path=path)
+        ma.reconstructDecay(f'D_s*+:Ch3 -> [D_s+:Ch3 -> [D0:km3pi -> K-:loose pi+:loose pi-:loose pi+:loose] {lepton_list} ?nu ?addbrems] gamma:recon',
+                            cut=Ds_star_Cut, chargeConjugation=ChargeC,
+                            allowChargeViolation=wrong_charge, path=path)
         ma.applyCuts("D_s*+:Ch3", Ds_star_Cut, path=path)
 
     # Best-candidate ranks only for selected channel
@@ -402,7 +443,7 @@ def build_selected_mode(
     #/================================================================================================================================/
     return d0list, dslist, Electron, BCS
 
-def Rest_of_Event_Ch(main_path, roe_path_Ch, ChargeC, ElectronROE_Cut, PionROE_Cut, GammaROE_Cut, *, is_mc):
+def Rest_of_Event_Ch(main_path, roe_path_Ch, ChargeC, ElectronROE_Cut, PionROE_Cut, GammaROE_Cut, *, is_mc, wrong_charge=False):
     #/================================================================================================================================/
     # D_s+ VETO Starts Here
     #------------------------
@@ -413,7 +454,11 @@ def Rest_of_Event_Ch(main_path, roe_path_Ch, ChargeC, ElectronROE_Cut, PionROE_C
     # Creates Electron Particle List (and c.c.)
     # all electrons found in ROE that are not used to reconstruct current D_s+ candidate
     # (one can add any cut)
-    ma.fillParticleList(decayString='e-:roe', cut=ElectronROE_Cut, path=roe_path_Ch)
+    # For wrong-charge control sample, we need e+ in ROE (opposite of signal e-)
+    if wrong_charge:
+        ma.fillParticleList(decayString='e+:roe', cut=ElectronROE_Cut, path=roe_path_Ch)
+    else:
+        ma.fillParticleList(decayString='e-:roe', cut=ElectronROE_Cut, path=roe_path_Ch)
 
     # Gamma
     # Creates gamma Particle List (and c.c.)
@@ -430,21 +475,33 @@ def Rest_of_Event_Ch(main_path, roe_path_Ch, ChargeC, ElectronROE_Cut, PionROE_C
     # we need a ParticleList containing the photon candidate used to reconstruct the
     # current D_s+ as well
     # The DecayString is used to specify the selected particle (^)
-    ma.fillSignalSideParticleList(outputListName='e+:sig', decayString='D_s+ -> D0 ^e+:corrected ?nu', path=roe_path_Ch)
-    ma.fillSignalSideParticleList(outputListName='D0:sig', decayString='D_s+ -> ^D0 e+:corrected ?nu', path=roe_path_Ch)
+    if wrong_charge:
+        ma.fillSignalSideParticleList(outputListName='e-:sig', decayString='D_s+ -> D0 ^e-:corrected ?nu', path=roe_path_Ch)
+        ma.fillSignalSideParticleList(outputListName='D0:sig', decayString='D_s+ -> ^D0 e-:corrected ?nu', path=roe_path_Ch)
+    else:
+        ma.fillSignalSideParticleList(outputListName='e+:sig', decayString='D_s+ -> D0 ^e+:corrected ?nu', path=roe_path_Ch)
+        ma.fillSignalSideParticleList(outputListName='D0:sig', decayString='D_s+ -> ^D0 e+:corrected ?nu', path=roe_path_Ch)
     # ma.fillSignalSideParticleList(outputListName='D_s+:sig',
     #                             decayString='^D_s+ -> [D0:kmpip -> K-:loose pi+:loose] e+:corrected ?nu',
     #                             path=roe_path)
 
     # Conversion Veto
     #-------------------------------------------------------------------------------------------
-    # Reconstruct gamma:veto -> e+:sig e-:roe
+    # Reconstruct gamma:veto -> signal_lepton ROE_lepton
     #-----------------------------------------------
     # make combinations of signal electron candidates with all electron from ROE
-    ma.reconstructDecay(decayString='gamma:veto -> e+:sig e-:roe', 
-                        cut='',
-                        chargeConjugation=ChargeC, 
-                        path=roe_path_Ch)
+    # For wrong-charge: signal has e-, ROE has e+ -> gamma:veto -> e-:sig e+:roe
+    # For standard: signal has e+, ROE has e- -> gamma:veto -> e+:sig e-:roe
+    if wrong_charge:
+        ma.reconstructDecay(decayString='gamma:veto -> e-:sig e+:roe',
+                            cut='',
+                            chargeConjugation=ChargeC,
+                            path=roe_path_Ch)
+    else:
+        ma.reconstructDecay(decayString='gamma:veto -> e+:sig e-:roe',
+                            cut='',
+                            chargeConjugation=ChargeC,
+                            path=roe_path_Ch)
     #
     # Vertex Fitting gamma:veto
     #----------------------------------
@@ -773,7 +830,7 @@ def Rest_of_Event_Ch(main_path, roe_path_Ch, ChargeC, ElectronROE_Cut, PionROE_C
     #/================================================================================================================================/
     return gamma_ROE_Ch, Dstar0Mode1_ROE_Ch, Dstar0Mode2_ROE_Ch, Dstarplus_ROE_Ch
 
-def build_roe_for_selected(main_path, dslist, ChargeC, ElectronROE_Cut, PionROE_Cut, GammaROE_Cut, *, is_mc):
+def build_roe_for_selected(main_path, dslist, ChargeC, ElectronROE_Cut, PionROE_Cut, GammaROE_Cut, *, is_mc, wrong_charge=False):
     #/================================================================================================================================/
     # ROE (Mode 1)
     #---------------------------------------------------------------------------------------------
@@ -815,7 +872,7 @@ def build_roe_for_selected(main_path, dslist, ChargeC, ElectronROE_Cut, PionROE_
     # First we check that the current ROE is related to D_s+ candidate
     ma.signalSideParticleFilter(particleList=dslist, selection='', roe_path=roe_path, deadEndPath=dead_end)
     #/================================================================================================================================/
-    return Rest_of_Event_Ch(main_path, roe_path, ChargeC, ElectronROE_Cut, PionROE_Cut, GammaROE_Cut, is_mc=is_mc)
+    return Rest_of_Event_Ch(main_path, roe_path, ChargeC, ElectronROE_Cut, PionROE_Cut, GammaROE_Cut, is_mc=is_mc, wrong_charge=wrong_charge)
 
 def Suggestion(path, mode, pi0_list):
     #/================================================================================================================================/
@@ -1336,10 +1393,10 @@ def Reconstruction_Variable(
     #/==========================================================================================================================/
     return D0_mode_vars, e_vars, km_vars, pip_vars, pi0_vars, D0_vars, Ds_vars, Event
 
-def create_reconstruction_path(mode, infile, outfile, pi0_list="eff50_May2020", truth=False, data=False):
+def create_reconstruction_path(mode, infile, outfile, pi0_list="eff50_May2020", truth=False, data=False, no_electron_id=False, wrong_charge=False):
     """
     Create basf2 path for Ds -> D0 e nu reconstruction.
-    
+
     Args:
         mode: D0 decay mode ('kmpip', 'kmpippi0', or 'km3pi')
         infile: Input mDST file path
@@ -1347,7 +1404,9 @@ def create_reconstruction_path(mode, infile, outfile, pi0_list="eff50_May2020", 
         pi0_list: Pi0 list for kmpippi0 mode (default: 'eff50_May2020')
         truth: Run in MC truth mode (default: False)
         data: Running on data - disable MC-only features (default: False)
-    
+        no_electron_id: Control sample - remove electron ID cut (default: False)
+        wrong_charge: Control sample - flip electron charge for D*0 background study (default: False)
+
     Returns:
         basf2.Path configured for reconstruction (does NOT call b2.process)
     """
@@ -1382,9 +1441,11 @@ def create_reconstruction_path(mode, infile, outfile, pi0_list="eff50_May2020", 
             D0kmpip_Cut=D0kmpip_Cut, D0kmpippi0_Cut=D0kmpippi0_Cut, D0km3pi_Cut=D0km3pi_Cut,
             Ds_D0kmpip_Cut=Ds_D0kmpip_Cut, Ds_D0kmpippi0_Cut=Ds_D0kmpippi0_Cut, Ds_D0km3pi_Cut=Ds_D0km3pi_Cut,
             Ds_star_Cut=Ds_star_Cut,
-            is_data=data
+            is_data=data,
+            no_electron_id=no_electron_id,
+            wrong_charge=wrong_charge
         )
-        
+
         # Single ROE build for the selected mode
         gamma_ROE, Dst0M1_ROE, Dst0M2_ROE, Dstp_ROE = build_roe_for_selected(
             main_path=path,
@@ -1393,7 +1454,8 @@ def create_reconstruction_path(mode, infile, outfile, pi0_list="eff50_May2020", 
             ElectronROE_Cut=ElectronROE_Cut,
             PionROE_Cut=PionROE_Cut,
             GammaROE_Cut=GammaROE_Cut,
-            is_mc=not data
+            is_mc=not data,
+            wrong_charge=wrong_charge
         )
         
         # Temporary compatibility aliases
@@ -1488,14 +1550,23 @@ if __name__ == '__main__':
     #/================================================================================================================================/
     # Setup output file
     #------------------
-    outfile = f"/home/belle2/amubarak/C01-Simulated_Events/Signal/output_test_{args.mode}.root"
+    # Build control sample suffix
+    cs_suffix = ""
+    if args.no_electron_id and args.wrong_charge:
+        cs_suffix = "_CS_noEID_wrongCharge"
+    elif args.no_electron_id:
+        cs_suffix = "_CS_noEID"
+    elif args.wrong_charge:
+        cs_suffix = "_CS_wrongCharge"
+
+    outfile = f"/home/belle2/amubarak/C01-Simulated_Events/Signal/output_test_{args.mode}{cs_suffix}.root"
     if args.mode == "kmpippi0":
-        outfile = f"/home/belle2/amubarak/C01-Simulated_Events/Signal/output_test_{args.mode}_{args.pi0_list}.root"
-    
+        outfile = f"/home/belle2/amubarak/C01-Simulated_Events/Signal/output_test_{args.mode}_{args.pi0_list}{cs_suffix}.root"
+
     # override if user supplied --outfile
     if args.outfile:
         outfile = args.outfile
-    
+
     #/================================================================================================================================/
     # Create and process path
     #------------------------
@@ -1505,7 +1576,9 @@ if __name__ == '__main__':
         outfile=outfile,
         pi0_list=args.pi0_list,
         truth=args.truth,
-        data=args.data
+        data=args.data,
+        no_electron_id=args.no_electron_id,
+        wrong_charge=args.wrong_charge
     )
     
     # Process events
