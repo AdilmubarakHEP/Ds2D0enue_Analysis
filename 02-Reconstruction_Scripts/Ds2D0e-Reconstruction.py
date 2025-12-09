@@ -1035,7 +1035,8 @@ def Reconstruction_Variable(
             ["M","dM","useCMSFrame(E)","useCMSFrame(p)","chiProb","cos(theta)","daughterAngle(0, 1)",
              'daughterDiffOf(0,1,theta)','daughterDiffOf(0,1,cos(theta))','daughterDiffOf(0,1,phi)',
              'daughterMotherDiffOf(0,x)','daughterMotherDiffOf(0,y)','daughterMotherDiffOf(0,z)',
-             "decayAngle(0)","cos(decayAngle(0))","decayAngle(1)","cos(decayAngle(1))",
+             "decayAngle(0)", "decayAngle(1)", "decayAngle(2)", "decayAngle(3)",
+             "cos(decayAngle(0))", "cos(decayAngle(1))", "cos(decayAngle(2))", "cos(decayAngle(3))",
              "significanceOfDistance","flightDistance","isSignal",'ifNANgiveX(isSignal,0)',
              'D0Mode','Dbar0Mode'] + truth_D0,
             decay_string='^D0:km3pi -> K-:loose pi+:loose pi-:loose pi+:loose', 
@@ -1164,6 +1165,15 @@ def Reconstruction_Variable(
     if mode == "kmpippi0":
         D0_vars = vu.create_aliases_for_selected(
             list_of_variables=["cosHelicityAngleMomentumPi0Dalitz","momentaTripleProduct(0, 1, 2)",],
+            decay_string='D_s+ -> ^D0 e+:corrected ?nu',
+            prefix=['D0'])
+        
+    if mode == "km3pi":
+        D0_vars = vu.create_aliases_for_selected(
+            list_of_variables=["decayAngle(2)", "decayAngle(3)", "cos(decayAngle(2))", "cos(decayAngle(3))",
+                               "daughterInvM(0, 1)", "daughterInvM(0, 2)", "daughterInvM(0, 3)", 
+                               "daughterInvM(1, 2)", "daughterInvM(1, 3)",
+                               "daughterInvM(2, 3)"],
             decay_string='D_s+ -> ^D0 e+:corrected ?nu',
             prefix=['D0'])
 

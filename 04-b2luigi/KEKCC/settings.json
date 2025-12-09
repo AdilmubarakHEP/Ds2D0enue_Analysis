@@ -1,15 +1,16 @@
 {
-  "date": "120725",
+  "date": "120925",
   "attempt": "1",
   "pi0_lists": [
     "eff20_May2020"
   ],
   "control_samples": {
     "signal": true,
-    "no_electron_id": false,
-    "wrong_charge": false,
+    "no_electron_id": true,
+    "wrong_charge": true,
     "both": false
   },
+  "generate_signal": true,
   "scheduler_port": 9882,
   "workers": 1000,
   "_comment_date": "Date format: DDMMYY (e.g., 011225 = December 1, 2025)",

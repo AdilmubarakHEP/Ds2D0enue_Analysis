@@ -29,20 +29,31 @@ SETTINGS_PATH = os.path.join(WORK_DIR, "settings.json")
 
 LOG_ROOT = os.path.join(WORK_DIR, "logs")
 
+# Modes
+M_KMPIP = "kmpip"
+M_KMPIPPI0 = "kmpippi0"
+M_KM3PI = "km3pi"
+
 # Temporary chunk outputs
 TEMP_BASE = "/group/belle2/users2022/amubarak"
 
 # Final merged outputs
 MERGE_ROOT = "/group/belle/users/amubarak/03-KEKCC"
 
+# Signal outputs
+SIGNAL_ROOT = "/home/belle2/amubarak/C01-Simulated_Events/Signal"
+
 # Input mDSTs
 MDST_ROOT = "/group/belle2/dataprod/MC/MC15ri"
 SAMPLES = ["ccbar", "charged", "ddbar", "mixed", "ssbar", "uubar"]
 
-# Modes
-M_KMPIP = "kmpip"
-M_KMPIPPI0 = "kmpippi0"
-M_KM3PI = "km3pi"
+# Signal input files (generated MC)
+SIGNAL_INPUT_DIR = "/home/belle2/amubarak/C00-Generation"
+SIGNAL_INPUTS = {
+    M_KMPIP: "ccbarDs+EventGeneration_Mode1.root",
+    M_KMPIPPI0: "ccbarDs+EventGeneration_Mode2.root",
+    M_KM3PI: "ccbarDs+EventGeneration_Mode3.root",
+}
 
 # Global, filled after reading settings.json
 SELECTED_PI0_LISTS: List[str] = []
@@ -81,6 +92,9 @@ def load_settings(path: str) -> dict:
     # Default control samples: signal only
     if "control_samples" not in cfg:
         cfg["control_samples"] = {"signal": True, "no_electron_id": False, "wrong_charge": False, "both": False}
+    # Default: don't generate signal (generic samples are always generated)
+    if "generate_signal" not in cfg:
+        cfg["generate_signal"] = False
     return cfg
 
 
@@ -168,6 +182,28 @@ def merged_output_path(date: str, attempt: str, mode: str,
     else:
         name = f"Ds2D0e-Generic_Ds_{date}_{attempt}_{sample}_{mode}{cs_suffix}.root"
     return os.path.join(MERGE_ROOT, name)
+
+
+def signal_output_path(attempt: str, mode: str, pi0: Optional[str],
+                       sample_type: str = "signal") -> str:
+    """
+    /home/belle2/amubarak/C01-Simulated_Events/Signal/
+        Ds2D0e-Signal_<attempt>_<mode>[_<pi0>][_CS_suffix].root
+    """
+    cs_suffix = control_sample_suffix(sample_type)
+    if mode == M_KMPIPPI0 and pi0:
+        name = f"Ds2D0e-Signal_{attempt}_{mode}_{pi0}{cs_suffix}.root"
+    else:
+        name = f"Ds2D0e-Signal_{attempt}_{mode}{cs_suffix}.root"
+    return os.path.join(SIGNAL_ROOT, name)
+
+
+def get_signal_input(mode: str) -> str:
+    """Get the full path to the signal input file for a given mode."""
+    filename = SIGNAL_INPUTS.get(mode)
+    if not filename:
+        raise ValueError(f"Unknown mode for signal: {mode}")
+    return os.path.join(SIGNAL_INPUT_DIR, filename)
 
 
 def _which_hadd() -> str:
@@ -404,6 +440,65 @@ class DsMergeTask(b2luigi.Task):
                         pass
 
 
+class SignalTask(Basf2PathTask):
+    """Process signal MC (single input file per mode) to produce reconstructed signal."""
+    attempt = b2luigi.Parameter()
+    mode = b2luigi.Parameter()      # "kmpip", "kmpippi0", "km3pi"
+    pi0 = b2luigi.Parameter(default="", significant=True)
+    sample_type = b2luigi.Parameter(default="signal")  # "signal", "no_electron_id", "wrong_charge", "both"
+
+    batch_system = DEFAULT_BATCH_SYSTEM
+    queue = "l"
+    max_event = 0  # full file
+
+    @property
+    def log_dir(self) -> str:
+        """
+        Base log directory:
+        logs/signal_<attempt>/<sample_type>/<mode>[/<pi0_list>]
+        """
+        base = os.path.join(LOG_ROOT, f"signal_{self.attempt}", self.sample_type, self.mode)
+        if self.mode == M_KMPIPPI0 and self.pi0:
+            base = os.path.join(base, self.pi0)
+        return base
+
+    def get_log_file_dir(self) -> str:
+        return self.log_dir
+
+    def _out_fullpath(self) -> str:
+        return signal_output_path(self.attempt, self.mode, (self.pi0 or None), sample_type=self.sample_type)
+
+    def output(self):
+        return [LocalTarget(self._out_fullpath())]
+
+    def create_path(self):
+        out_full = self._out_fullpath()
+        os.makedirs(os.path.dirname(out_full), exist_ok=True)
+
+        # Get signal input file for this mode
+        infile = get_signal_input(self.mode)
+
+        if self.mode == M_KMPIPPI0:
+            pi0_list = self.pi0
+        else:
+            # Steering default for non pi0 modes
+            pi0_list = "eff50_May2020"
+
+        # Get control sample flags
+        no_electron_id, wrong_charge = control_sample_flags(self.sample_type)
+
+        return create_reconstruction_path(
+            mode=self.mode,
+            infile=infile,
+            outfile=out_full,
+            pi0_list=pi0_list,
+            truth=False,
+            data=False,
+            no_electron_id=no_electron_id,
+            wrong_charge=wrong_charge,
+        )
+
+
 class DsCampaign(b2luigi.WrapperTask):
     date = b2luigi.Parameter()
     attempt = b2luigi.Parameter()
@@ -432,12 +527,43 @@ class DsCampaign(b2luigi.WrapperTask):
                     )
 
 
-class CleanupLogsTask(b2luigi.Task):
-    date = b2luigi.Parameter()
+class SignalCampaign(b2luigi.WrapperTask):
+    """Generate all signal samples based on settings.json configuration."""
     attempt = b2luigi.Parameter()
 
     def requires(self):
-        return DsCampaign(date=self.date, attempt=self.attempt)
+        # Get enabled control sample types
+        enabled_types = [st for st, enabled in ENABLED_CONTROL_SAMPLES.items() if enabled]
+        if not enabled_types:
+            logging.warning("No control samples enabled! Defaulting to signal only.")
+            enabled_types = ["signal"]
+
+        for sample_type in enabled_types:
+            # No pi0 modes
+            yield SignalTask(attempt=self.attempt, mode=M_KMPIP, sample_type=sample_type)
+            yield SignalTask(attempt=self.attempt, mode=M_KM3PI, sample_type=sample_type)
+            # With pi0 lists from settings.json
+            for pi0 in SELECTED_PI0_LISTS:
+                yield SignalTask(
+                    attempt=self.attempt,
+                    mode=M_KMPIPPI0,
+                    pi0=pi0,
+                    sample_type=sample_type,
+                )
+
+
+class CleanupLogsTask(b2luigi.Task):
+    date = b2luigi.Parameter()
+    attempt = b2luigi.Parameter()
+    generate_signal = b2luigi.BoolParameter(default=False)
+
+    def requires(self):
+        # Always require generic samples
+        yield DsCampaign(date=self.date, attempt=self.attempt)
+
+        # Optionally also require signal
+        if self.generate_signal:
+            yield SignalCampaign(attempt=self.attempt)
 
     def output(self):
         marker = os.path.join(WORK_DIR, f".cleanup_{self.date}_{self.attempt}.done")
@@ -461,13 +587,22 @@ class CleanupLogsTask(b2luigi.Task):
                 except Exception:
                     pass
 
-        # Remove full temp directory for this campaign
+        # Remove temp directory for generic samples
         temp_root = os.path.join(TEMP_BASE, f"temp_{self.date}_{self.attempt}")
         try:
             if os.path.isdir(temp_root):
                 shutil.rmtree(temp_root, ignore_errors=True)
         except Exception:
             pass
+
+        # Remove temp directory for signal if it was generated
+        if self.generate_signal:
+            signal_temp_root = os.path.join(TEMP_BASE, f"temp_signal_{self.attempt}")
+            try:
+                if os.path.isdir(signal_temp_root):
+                    shutil.rmtree(signal_temp_root, ignore_errors=True)
+            except Exception:
+                pass
 
         os.makedirs(os.path.dirname(self.output()[0].path), exist_ok=True)
         with self.output()[0].open("w") as f:
@@ -493,6 +628,14 @@ def _merge_on_failure(task, *args, **kwargs):
         pass
 
 
+@SignalTask.event_handler(Event.FAILURE)
+def _signal_on_failure(task, *args, **kwargs):
+    try:
+        _keep_only_stderr(task.get_log_file_dir())
+    except Exception:
+        pass
+
+
 BROKEN_EVENT = getattr(Event, "BROKEN_TASK", None)
 if BROKEN_EVENT:
     @DsChunkTask.event_handler(BROKEN_EVENT)
@@ -503,6 +646,10 @@ if BROKEN_EVENT:
     def _merge_on_broken(task, *a, **k):
         _merge_on_failure(task, *a, **k)
 
+    @SignalTask.event_handler(BROKEN_EVENT)
+    def _signal_on_broken(task, *a, **k):
+        _signal_on_failure(task, *a, **k)
+
 # ============================================================
 # Main
 # ============================================================
@@ -511,6 +658,7 @@ def _ensure_dirs():
     os.makedirs(WORK_DIR, exist_ok=True)
     os.makedirs(LOG_ROOT, exist_ok=True)
     os.makedirs(MERGE_ROOT, exist_ok=True)
+    os.makedirs(SIGNAL_ROOT, exist_ok=True)
     os.makedirs(TEMP_BASE, exist_ok=True)
 
 
@@ -543,6 +691,7 @@ if __name__ == "__main__":
     attempt = cfg["attempt"]
     pi0_lists = cfg.get("pi0_lists", [])
     control_samples = cfg.get("control_samples", {"signal": True, "no_electron_id": False, "wrong_charge": False, "both": False})
+    generate_signal = cfg.get("generate_signal", False)
     workers_cfg = int(cfg.get("workers", 50))
     scheduler_port_cfg = int(cfg.get("scheduler_port", 8082))
     scheduler_host_cfg = cfg.get("scheduler_host", "localhost")
@@ -557,16 +706,27 @@ if __name__ == "__main__":
 
     workers = args.workers if args.workers is not None else workers_cfg
 
-    root_task = CleanupLogsTask(date=date, attempt=attempt)
+    # Always run generic samples, optionally include signal
+    if generate_signal:
+        logging.info("Running campaign: Generic samples + Signal")
+    else:
+        logging.info("Running campaign: Generic samples only")
+
+    root_task = CleanupLogsTask(date=date, attempt=attempt, generate_signal=generate_signal)
 
     # Build luigi argv: keep unknown args, inject scheduler flags from settings.json
     luigi_args = list(unknown)
 
-    if not _has_flag(luigi_args, "--scheduler-port"):
-        luigi_args.append(f"--scheduler-port={scheduler_port_cfg}")
+    # Only add scheduler flags if not doing dry-run or test mode
+    # (dry-run/test require local scheduler)
+    is_test_mode = _has_flag(luigi_args, "--dry-run") or _has_flag(luigi_args, "--test")
 
-    if not _has_flag(luigi_args, "--scheduler-host"):
-        luigi_args.append(f"--scheduler-host={scheduler_host_cfg}")
+    if not is_test_mode:
+        if not _has_flag(luigi_args, "--scheduler-port"):
+            luigi_args.append(f"--scheduler-port={scheduler_port_cfg}")
+
+        if not _has_flag(luigi_args, "--scheduler-host"):
+            luigi_args.append(f"--scheduler-host={scheduler_host_cfg}")
 
     # Let luigi see only its own args
     sys.argv = [sys.argv[0]] + luigi_args
