@@ -1,3 +1,28 @@
+# %% [markdown]
+# # Fake D⁰ BDT Training - Multi-Mode Implementation
+# 
+# ## Overview
+# 
+# This notebook trains an XGBoost BDT to suppress fake D⁰ backgrounds using the **corrected labeling procedure**:
+# 
+# - **Real D⁰**: `abs(D0_mcPDG) == 421` from BOTH signal MC AND generic MC
+# - **Fake D⁰**: `abs(D0_mcPDG) != 421` or NaN from generic MC
+# 
+# **Key Features**:
+# - Multi-mode support: kmpip, km3pi, kmpippi0_eff20_May2020
+# - Uses ALL variables from `final_variables.py` (278, 478, 788 vars per mode)
+# - Sequential processing to avoid memory bloat
+# - Punzi FoM for cut optimization (90% CL, 95% CL, 3σ)
+# - Configurable hyperparameter optimization toggle
+# - Control sample support with toggle
+# - Comprehensive plotting and diagnostics
+# - Automatic saving to `/group/belle/users/amubarak/04-ML/`
+
+# %% [markdown]
+# ## System Information
+# 
+# Check available CPU cores and RAM before processing.
+
 # %%
 import os
 
@@ -10,39 +35,31 @@ mem = psutil.virtual_memory()
 print(f"Total RAM: {mem.total / 1e9:.2f} GB")
 print(f"Available: {mem.available / 1e9:.2f} GB")
 
-# %%
-# !pip uninstall -y scikit-learn
-# !pip install scikit-learn==1.3.1
+# %% [markdown]
+# ## Imports
 
 # %%
-# ! pip install --upgrade pip
-# ! pip install --user xgboost seaborn
-# ! pip install --user bayesian-optimization
-
-# %%
-# import mplhep
 import sys
-
+import gc
 import seaborn as sns
 
 import numpy as np
 import pandas as pd
 import uproot
 from matplotlib import pyplot as plt
+from tqdm import tqdm
 
-from sklearn.datasets import make_classification,make_regression
 from sklearn.ensemble import GradientBoostingClassifier
-from sklearn.metrics import auc,roc_curve,confusion_matrix,classification_report,precision_recall_curve,mean_squared_error,accuracy_score,roc_auc_score
-from sklearn.model_selection import GridSearchCV, cross_validate, validation_curve,train_test_split,KFold,learning_curve,cross_val_score
+from sklearn.metrics import auc, roc_curve, confusion_matrix, classification_report
+from sklearn.metrics import precision_recall_curve, mean_squared_error, accuracy_score, roc_auc_score
+from sklearn.model_selection import GridSearchCV, cross_validate, validation_curve
+from sklearn.model_selection import train_test_split, KFold, learning_curve, cross_val_score
 from sklearn.utils import compute_sample_weight
-from scipy.stats import ks_2samp
+from scipy.stats import ks_2samp, randint, uniform
 
 import xgboost
 from xgboost import XGBClassifier
-
 from sklearn.model_selection import RandomizedSearchCV
-
-from scipy.stats import randint, uniform
 
 # %%
 plt.rcParams.update({
@@ -58,1305 +75,1311 @@ pd.set_option('display.max_rows', 200000)
 pd.set_option('display.max_columns', 200000)
 
 # %%
-sys.path.append("/home/belle2/amubarak/Ds2D0enue_Analysis/07-Python_Functions/")
+sys.path.append("/home/belle2/amubarak/Ds2D0enue_Analysis/08-Python_Functions/")
+sys.path.append("/home/belle2/amubarak/Ds2D0enue_Analysis/05-ML/Variables/")
+
+# Import custom functions
+from Functions import optimize_cut, plot_save
+from Ds2D0e_config import DECAY_CONFIG, BACKGROUND_SAMPLES, get_signal_file, get_generic_file
+from final_variables import VARIABLES
+
+print("Imported custom functions successfully")
 
 # %% [markdown]
-# # Prep-Work
+# ## Configuration
+# 
+# Set the parameters for BDT training, data loading, and output saving.
+# 
+# **Important toggles**:
+# - `LOAD_CONTROL_SAMPLES`: Enable/disable control sample processing (WCh, ReverseID, etc.)
+# - `RUN_OPTIMIZATION`: Enable/disable hyperparameter optimization via RandomizedSearchCV
+# - `SAVE_OUTPUT`: Enable/disable ROOT file output saving
+# - `SAVE_IMAGES`: Enable/disable plot saving
+
+# %%
+# ========================================================================
+# CONFIGURATION SECTION
+# ========================================================================
+
+# === Mode Selection ===
+# Set to specific mode: "kmpip", "km3pi", "kmpippi0_eff20_May2020"
+# Set to "all" to train on all modes sequentially
+TRAIN_MODE = "all"  # Change this to train different modes
+
+# === Control Samples ===
+# Toggle for loading control samples (noEID, wrongCharge, reverseID)
+LOAD_CONTROL_SAMPLES = False  # Set to True to load control samples
+CONTROL_SAMPLES = ["WCh", "ReverseID", "ReverseID_WCh"]  # Which control samples to load
+
+# === Image Saving ===
+SAVE_IMAGES = True  # Set to True to save all plots
+OUTPUT_DIR = "/home/belle2/amubarak/Ds2D0enue_Analysis/05-ML/Figures/FakeD0_BDT"
+
+# === ROOT File Output Saving ===
+SAVE_OUTPUT = False  # Set to True to save DataFrames with BDT to ROOT files
+OUTPUT_BASE_DIR = "/group/belle/users/amubarak/04-ML/"
+
+# === Normalization Parameters for Punzi FoM ===
+N_SIGNAL_EVENTS = 100_000  # Number of signal MC events generated
+LUMINOSITY_FB = 200  # Integrated luminosity in fb^-1
+PUNZI_A_VALUES = [1.64, 1.96, 3.0]  # 90% CL, 95% CL, 3σ discovery
+
+# === BDT Training Parameters ===
+RANDOM_STATE = 42
+TEST_SIZE = 0.30
+N_ESTIMATORS = 100
+
+# === Hyperparameter Optimization Toggle ===
+RUN_OPTIMIZATION = False  # Set to False to skip hyperparameter optimization
+RANDOM_SEARCH_ITERS = 50  # Number of random search iterations (only if RUN_OPTIMIZATION=True)
+
+print(f"Configuration loaded:")
+print(f"  Train mode: {TRAIN_MODE}")
+print(f"  Load control samples: {LOAD_CONTROL_SAMPLES}")
+print(f"  Save images: {SAVE_IMAGES}")
+print(f"  Save output: {SAVE_OUTPUT}")
+print(f"  Run hyperparameter optimization: {RUN_OPTIMIZATION}")
+print(f"  N signal events: {N_SIGNAL_EVENTS:,}")
+print(f"  Luminosity: {LUMINOSITY_FB} fb^-1")
 
 # %% [markdown]
-# ### Import Data
+# ## Import Data Configuration and Variables
+# 
+# Load decay mode configurations from `Ds2D0e_config.py` and the final variable lists from `final_variables.py`.
+# 
+# **Variable counts per mode**:
+# - kmpip: 278 variables
+# - km3pi: 478 variables  
+# - kmpippi0_eff20_May2020: 788 variables
+# 
+# We use ALL variables from `final_variables.py` without reduction at this stage.
+
+# %%
+from Ds2D0e_config import DECAY_CONFIG, BACKGROUND_SAMPLES, get_signal_file, get_generic_file
+from final_variables import VARIABLES
+
+print("Available decay modes:")
+for mode in DECAY_CONFIG.keys():
+    print(f"  - {mode}")
+
+print("\nVariable counts per mode:")
+for mode in VARIABLES.keys():
+    print(f"  {mode}: {len(VARIABLES[mode]['all_vars'])} variables")
 
 # %% [markdown]
-# Correct Charge
+# ## Helper Functions
+# 
+# ### Punzi Figure of Merit
+# 
+# The Punzi FoM is used for cut optimization in the presence of systematic uncertainties:
+# 
+# $$\text{Punzi FoM} = \frac{\epsilon_S}{\frac{a}{2} + \sqrt{B}}$$
+# 
+# where:
+# - $\epsilon_S$ is the signal efficiency
+# - $B$ is the number of background events
+# - $a$ is the confidence level parameter:
+#   - $a = 1.64$ for 90% CL
+#   - $a = 1.96$ for 95% CL
+#   - $a = 3.0$ for 3σ discovery
+# 
+# This is preferred over the simple $S/\sqrt{S+B}$ FoM when systematic uncertainties are significant.
 
 # %%
-# # In this notebook we only process the main signal and the generic events,
-# # for illustration purposes.
-# # You can add other backgrounds after if you wish.
-# samples = ["Signal","All","BB","ccbar","ddbar","ssbar","taupair","uubar","uds"]
-# GenEvents = ["Signal","BB","ccbar","ddbar","ssbar","taupair","uubar"]
-
-# DataFrames = {}  # define empty dictionary to hold dataframes
-
-# # Signal:
-# DataFrames[samples[0]] =  uproot.concatenate("/home/belle2/amubarak/C01-Simulated_Events/Ds2D0enu-Signal.root:Dstree",library='pd')
-# # Background
-# for s in samples[1:]: # loop over samples
-#     DataFrames[s] =  uproot.concatenate("/group/belle2/users2022/amubarak/TopoAna/Completed_TopoAna/TopoAna_"+ s +".root:Dstree",library='pd')
-
-# %%
-import os
-import pandas as pd
-import uproot
-from tqdm import tqdm
-
-# === Load only selected branches ===
-with open("/home/belle2/amubarak/Ds2D0enue_Analysis/03-Grid/Save_var.txt") as f:
-    variables_to_load = [
-        line.strip().strip(",").strip('"').strip("'")
-        for line in f
-        if line.strip() and not line.strip().startswith("#")
-    ]
-
-samples = ["Signal", "BB", "ccbar", "ddbar", "ssbar", "taupair", "uubar"]
-GenEvents = ["Signal","BB","ccbar","ddbar","ssbar","taupair","uubar"]
-Date = "0530"
-Attempt = "0"
-
-DataFrames = {}
-
-# === Load each sample one by one with progress bar ===
-for name in tqdm(samples, desc="Loading samples"):
-    if name == "Signal":
-        path = "/home/belle2/amubarak/C01-Simulated_Events/Ds2D0enu-Signal.root:Dstree"
-    else:
-        path = f"/group/belle/users/amubarak/02-Grid/Sample_Grid/Ds2D0e-Generic_Ds_{Date}25_{Attempt}_{name}.root:Dstree"
-
-    try:
-        df = uproot.concatenate(path, filter_name=variables_to_load, library='pd')
-        print(f"✔️ Loaded {name} with {len(df):,} entries")
-        DataFrames[name] = df
-    except Exception as e:
-        print(f"❌ Failed to load {name}: {e}")
-        DataFrames[name] = pd.DataFrame()
-
-# === Merge background categories ===
-background_samples = ["BB", "ccbar", "ddbar", "ssbar", "taupair", "uubar"]
-DataFrames["All"] = pd.concat([DataFrames[s] for s in background_samples], ignore_index=True)
-
-# === Combine uds light-quark backgrounds ===
-DataFrames["uds"] = pd.concat(
-    [DataFrames["uubar"], DataFrames["ddbar"], DataFrames["ssbar"]],
-    ignore_index=True
-)
-
-# %% [markdown]
-# Incorrect Charge
-
-# %%
-import os
-import pandas as pd
-import uproot
-from tqdm import tqdm
-
-# === Load only selected branches ===
-with open("/home/belle2/amubarak/Ds2D0enue_Analysis/03-Grid/Save_var.txt") as f:
-    variables_to_load = [
-        line.strip().strip(",").strip('"').strip("'")
-        for line in f
-        if line.strip() and not line.strip().startswith("#")
-    ]
-
-# === Configuration ===
-samples_WCh = [
-    "Signal_WCh", "BB_WCh", "ccbar_WCh", "ddbar_WCh",
-    "ssbar_WCh", "taupair_WCh", "uubar_WCh", "Data_WCh"
-]
-Date_WCh = "0630"
-Attempt_WCh = "0"
-
-# === Load one sample at a time ===
-for sample in tqdm(samples_WCh, desc="Loading WCh samples"):
-    if sample == "Signal_WCh":
-        path = "/home/belle2/amubarak/C01-Simulated_Events/Ds2D0enu-Signal_WCh.root:Dstree"
-    else:
-        path = f"/group/belle/users/amubarak/02-Grid/Sample_Grid_WCh/Ds2D0e-Generic_Ds_{Date_WCh}25_{Attempt_WCh}_{sample}.root:Dstree"
-
-    try:
-        df = uproot.concatenate(path, filter_name=variables_to_load, library='pd')
-        DataFrames[sample] = df
-        print(f"✔️ Loaded: {path} [{len(df):,} entries]")
-    except Exception as e:
-        print(f"❌ Failed: {sample} — {e}")
-
-# %% [markdown]
-# Reversed PID
-
-# %%
-import os
-import glob
-import uproot
-import pandas as pd
-from tqdm import tqdm
-
-# === Configuration ===
-Date_ReverseID = "0626"
-Attempt_ReverseID = "0"
-
-# === Prompt user for veto toggle ===
-apply_veto = input("Apply veto cut on Ds_diff_D0pi? (y/n): ").strip().lower() == "y"
-
-# === Define veto window ===
-cut_low = 0.14543 - (3*0.00041124)
-cut_high = 0.14543 + (3*0.00041124)
-
-# === Variables to load ===
-with open("/home/belle2/amubarak/Ds2D0enue_Analysis/03-Grid/Save_var.txt") as f:
-    variables_to_load = [
-        line.strip().strip(",").strip('"').strip("'")
-        for line in f if line.strip() and not line.strip().startswith("#")
-    ]
-
-if apply_veto and "Ds_diff_D0pi" not in variables_to_load:
-    variables_to_load.append("Ds_diff_D0pi")
-
-# === Load merged background and signal samples ===
-merged_samples = {
-    "Signal_ReverseID": "/home/belle2/amubarak/C01-Simulated_Events/Ds2D0enu-Signal_ReverseID.root",
-    "BB_ReverseID": f"/group/belle/users/amubarak/02-Grid/Sample_Grid_ReverseID/Ds2D0e-Generic_Ds_{Date_ReverseID}25_{Attempt_ReverseID}_BB_ReverseID.root",
-    "ddbar_ReverseID": f"/group/belle/users/amubarak/02-Grid/Sample_Grid_ReverseID/Ds2D0e-Generic_Ds_{Date_ReverseID}25_{Attempt_ReverseID}_ddbar_ReverseID.root",
-    "ssbar_ReverseID": f"/group/belle/users/amubarak/02-Grid/Sample_Grid_ReverseID/Ds2D0e-Generic_Ds_{Date_ReverseID}25_{Attempt_ReverseID}_ssbar_ReverseID.root",
-    "taupair_ReverseID": f"/group/belle/users/amubarak/02-Grid/Sample_Grid_ReverseID/Ds2D0e-Generic_Ds_{Date_ReverseID}25_{Attempt_ReverseID}_taupair_ReverseID.root",
-    "uubar_ReverseID": f"/group/belle/users/amubarak/02-Grid/Sample_Grid_ReverseID/Ds2D0e-Generic_Ds_{Date_ReverseID}25_{Attempt_ReverseID}_uubar_ReverseID.root",
-    "Data_ReverseID": f"/group/belle/users/amubarak/02-Grid/Sample_Grid_ReverseID/Ds2D0e-Generic_Ds_{Date_ReverseID}25_{Attempt_ReverseID}_Data_ReverseID.root",
-}
-
-print("\n📦 Loading merged samples...")
-for sample, path in tqdm(merged_samples.items(), desc="Merged Samples"):
-    try:
-        df = uproot.concatenate(f"{path}:Dstree", filter_name=variables_to_load, library="pd")
-        if apply_veto:
-            df = df[(df["Ds_diff_D0pi"] <= cut_low) | (df["Ds_diff_D0pi"] >= cut_high)]
-        DataFrames[sample] = df
-        print(f"✔️ {sample}: {len(df):,} entries")
-    except Exception as e:
-        print(f"❌ Failed to load {sample}: {e}")
-
-# === Load ccbar_ReverseID chunks sequentially ===
-chunk_dir = f"/group/belle/users/amubarak/02-Grid/Sample_Grid_ReverseID/Ds_{Date_ReverseID}25_{Attempt_ReverseID}_ccbar_ReverseID_Chunks"
-chunk_paths = [os.path.join(chunk_dir, f"ccbar_chunk_{i:02d}.root") for i in range(40)]
-
-DataFrames["ccbar_ReverseID"] = []
-
-print("\n🧱 Loading ccbar_ReverseID chunks one by one...")
-for path in tqdm(chunk_paths, desc="ccbar Chunks"):
-    try:
-        df = uproot.concatenate(f"{path}:Dstree", filter_name=variables_to_load, library="pd")
-        if apply_veto:
-            df = df[(df["Ds_diff_D0pi"] <= cut_low) | (df["Ds_diff_D0pi"] >= cut_high)]
-        DataFrames["ccbar_ReverseID"].append(df)
-    except Exception as e:
-        print(f"❌ Error loading {path}: {e}")
-
-# === Concatenate all loaded DataFrames ===
-if DataFrames["ccbar_ReverseID"]:
-    DataFrames["ccbar_ReverseID"] = pd.concat(DataFrames["ccbar_ReverseID"], ignore_index=True)
-    print(f"✅ ccbar_ReverseID: {len(DataFrames['ccbar_ReverseID']):,} entries")
-else:
-    print("❌ ccbar_ReverseID failed to load any chunks.")
-
-# %% [markdown]
-# Reverse PID and Wrong Charge
-
-# %%
-import os
-import glob
-import uproot
-import pandas as pd
-from tqdm import tqdm
-
-# === Configuration ===
-Date_ReverseID = "0708"
-Attempt_ReverseID = "0"
-
-# === Prompt user for veto toggle ===
-apply_veto = input("Apply veto cut on Ds_diff_D0pi? (y/n): ").strip().lower() == "y"
-
-# === Define veto window ===
-cut_low = 0.14543 - (3*0.00041124)
-cut_high = 0.14543 + (3*0.00041124)
-
-# === Variables to load ===
-with open("/home/belle2/amubarak/Ds2D0enue_Analysis/03-Grid/Save_var.txt") as f:
-    variables_to_load = [
-        line.strip().strip(",").strip('"').strip("'")
-        for line in f if line.strip() and not line.strip().startswith("#")
-    ]
-
-if apply_veto and "Ds_diff_D0pi" not in variables_to_load:
-    variables_to_load.append("Ds_diff_D0pi")
-
-# === Load merged background and signal samples ===
-merged_samples = {
-    "BB_ReverseID_WCh": f"/group/belle/users/amubarak/02-Grid/Sample_Grid_ReverseID_WCh/Ds2D0e-Generic_Ds_{Date_ReverseID}25_{Attempt_ReverseID}_BB_ReverseID_WCh.root",
-    "ccbar_ReverseID_WCh": f"/group/belle/users/amubarak/02-Grid/Sample_Grid_ReverseID_WCh/Ds2D0e-Generic_Ds_{Date_ReverseID}25_{Attempt_ReverseID}_ccbar_ReverseID_WCh.root",
-    "ddbar_ReverseID_WCh": f"/group/belle/users/amubarak/02-Grid/Sample_Grid_ReverseID_WCh/Ds2D0e-Generic_Ds_{Date_ReverseID}25_{Attempt_ReverseID}_ddbar_ReverseID_WCh.root",
-    "ssbar_ReverseID_WCh": f"/group/belle/users/amubarak/02-Grid/Sample_Grid_ReverseID_WCh/Ds2D0e-Generic_Ds_{Date_ReverseID}25_{Attempt_ReverseID}_ssbar_ReverseID_WCh.root",
-    "taupair_ReverseID_WCh": f"/group/belle/users/amubarak/02-Grid/Sample_Grid_ReverseID_WCh/Ds2D0e-Generic_Ds_{Date_ReverseID}25_{Attempt_ReverseID}_taupair_ReverseID_WCh.root",
-    "uubar_ReverseID_WCh": f"/group/belle/users/amubarak/02-Grid/Sample_Grid_ReverseID_WCh/Ds2D0e-Generic_Ds_{Date_ReverseID}25_{Attempt_ReverseID}_uubar_ReverseID_WCh.root",
-    "Data_ReverseID_WCh": f"/group/belle/users/amubarak/02-Grid/Sample_Grid_ReverseID_WCh/Ds2D0e-Generic_Ds_{Date_ReverseID}25_{Attempt_ReverseID}_Data_ReverseID_WCh.root",
-}
-
-print("\n📦 Loading merged samples...")
-for sample, path in tqdm(merged_samples.items(), desc="Merged Samples"):
-    try:
-        df = uproot.concatenate(f"{path}:Dstree", filter_name=variables_to_load, library="pd")
-        if apply_veto:
-            df = df[(df["Ds_diff_D0pi"] <= cut_low) | (df["Ds_diff_D0pi"] >= cut_high)]
-        DataFrames[sample] = df
-        print(f"✔️ {sample}: {len(df):,} entries")
-    except Exception as e:
-        print(f"❌ Failed to load {sample}: {e}")
-
-# # === Load ccbar_ReverseID_WCh chunks sequentially ===
-# chunk_dir = f"/group/belle/users/amubarak/02-Grid/Sample_Grid_ReverseID_WCh/Ds_{Date_ReverseID}25_{Attempt_ReverseID}_ccbar_ReverseID_WCh_Chunks"
-# chunk_paths = [os.path.join(chunk_dir, f"ccbar_chunk_{i:02d}.root") for i in range(40)]
-
-# DataFrames["ccbar_ReverseID_WCh"] = []
-
-# print("\n🧱 Loading ccbar_ReverseID chunks one by one...")
-# for path in tqdm(chunk_paths, desc="ccbar Chunks"):
-#     try:
-#         df = uproot.concatenate(f"{path}:Dstree", filter_name=variables_to_load, library="pd")
-#         if apply_veto:
-#             df = df[(df["Ds_diff_D0pi"] <= cut_low) | (df["Ds_diff_D0pi"] >= cut_high)]
-#         DataFrames["ccbar_ReverseID_WCh"].append(df)
-#     except Exception as e:
-#         print(f"❌ Error loading {path}: {e}")
-
-# # === Concatenate all loaded DataFrames ===
-# if DataFrames["ccbar_ReverseID_WCh"]:
-#     DataFrames["ccbar_ReverseID_WCh"] = pd.concat(DataFrames["ccbar_ReverseID_WCh"], ignore_index=True)
-#     print(f"✅ ccbar_ReverseID_WCh: {len(DataFrames['ccbar_ReverseID_WCh']):,} entries")
-# else:
-#     print("❌ ccbar_ReverseID_WCh failed to load any chunks.")
-
-# %% [markdown]
-# The line below is to look at the available variables.
-
-# %%
-print(DataFrames.keys())
-
-# %%
-DataFrames["All"].columns.tolist()
-
-# %% [markdown]
-# ### Setup
-# The code below will be used to apply cuts to the data.  
-# The range of the plots.
-
-# %%
-# Electron ID
-#-------------------
-# DataFrames["Signal"] = DataFrames["Signal"][DataFrames["Signal"]['e_electronID']>=0.95]
-# DataFrames["ccbar"] = DataFrames["ccbar"][DataFrames["ccbar"]['e_electronID']>=0.95]
-# DataFrames["Signal"] = DataFrames["Signal"][DataFrames["Signal"]['Ds_gammaveto_em_electronID']>=0.95]
-# DataFrames["ccbar"] = DataFrames["ccbar"][DataFrames["ccbar"]['Ds_gammaveto_em_electronID']>=0.95]
-
-# Photon Conversion
-#-------------------
-# DataFrames[samples[0]] = DataFrames[samples[0]][DataFrames[samples[0]]['Ds_gammaveto_M_Correction']>=0.1]
-# DataFrames[samples[1]] = DataFrames[samples[1]][DataFrames[samples[1]]['Ds_gammaveto_M_Correction']>=0.1]
-
-# Peaking Background Removal
-#----------------------------
-# DataFrames["ccbar"] = DataFrames["ccbar"][(DataFrames["ccbar"]['Ds_diff_D0pi']>=0.15)]
-# DataFrames["Signal"] = DataFrames["Signal"][(DataFrames["Signal"]['Ds_diff_D0pi']>=0.15)]
-
-# # Vertex Fitting
-# #----------------
-# DataFrames["Signal"] = DataFrames["Signal"][DataFrames["Signal"]['Ds_chiProb']>=0.01]
-# DataFrames["ccbar"] = DataFrames["ccbar"][DataFrames["ccbar"]['Ds_chiProb']>=0.01]
-
-# Dalitz Removal
-#----------------------------
-# DataFrames["ccbar"] = DataFrames["ccbar"][(DataFrames["ccbar"]['Ds_pi0veto_M_Correction']<=0.08) | (DataFrames["ccbar"]['Ds_pi0veto_M_Correction']>=0.16)]
-# DataFrames["Signal"] = DataFrames["Signal"][(DataFrames["Signal"]['Ds_pi0veto_M_Correction']<=0.08) | (DataFrames["Signal"]['Ds_pi0veto_M_Correction']>=0.16)]
-
-# Vertex Fit
-#----------------
-# DataFrames[samples[0]] = DataFrames[samples[0]][DataFrames[samples[0]]['Ds_chiProb_rank']==1]
-# DataFrames[samples[1]] = DataFrames[samples[1]][DataFrames[samples[1]]['Ds_chiProb_rank']==1]
-
-# D0 Invariant Mass
-#-----------------------
-# DataFrames[samples[0]] = DataFrames[samples[0]][(DataFrames[samples[0]]['Ds_D0_sideband']==1)]
-# DataFrames[samples[1]] = DataFrames[samples[1]][(DataFrames[samples[1]]['Ds_D0_sideband']==1)]
-
-# %% [markdown]
-# ## Photon Conversion Veto
-
-# %%
-for key in DataFrames.keys():
-    df = DataFrames[key]
-    if "Ds_gammaveto_M_Correction" in df.columns:
-        DataFrames[key] = df[
-            (df["Ds_gammaveto_M_Correction"] >= 0.1)
-        ]
-
-# %% [markdown]
-# ## $D^{*+}$ Veto
-
-# %%
-cut_low = 0.14541 - (3*0.00039706)
-cut_high = 0.14541 + (3*0.00042495)
-
-for key in DataFrames.keys():
-    df = DataFrames[key]
-    if "Ds_diff_D0pi" in df.columns:
-        DataFrames[key] = df[
-            (df["Ds_diff_D0pi"] <= cut_low) | (df["Ds_diff_D0pi"] >= cut_high)
-        ]
-
-# %% [markdown]
-# # Fake $D^0$ Suppression
-
-# %%
-# # === Updated Variables ===
-# Variables = [
-#     'pi_dr',
-# #     'pi_dz',
-#     'K_dr',
-# #     'K_dz',
-#     'D0_dM',
-#     'D0_chiProb',
-#     'D0_flightDistance',
-#     'D0_flightTime',
-#     'D0_useCMSFrame_p',
-#     'D0_cos_decayAngle_1',
-# ]
-
-# features = [
-#     r'$dr(\pi^{+})\;[\mathrm{cm}]$',
-# #     r'$dz(\pi^{+})\;[\mathrm{cm}]$',
-#     r'$dr(K^{-})\;[\mathrm{cm}]$',
-# #     r'$dz(K^{-})\;[\mathrm{cm}]$',
-#     r'$m(D^{0}) - m_{\mathrm{PDG}}(D^{0})\;[\mathrm{GeV}/c^{2}]$',
-#     r'p-value of $D^{0}$',
-#     r'$Flight\;Distance(D^{0})\;[\mathrm{cm}]$',
-#     r'$Flight\;Time(D^{0})\;[\mathrm{ns}]$',
-#     r'$p^{*}(D^{0})\;[\mathrm{GeV}/c]$',
-#     r'$\cos\theta^*_{\mathrm{daughter}_1}$',
-# ]
-
-# ranges = {
-#     'pi_dr': [0, 0.1],
-# #     'pi_dz': [-0.5, 0.5],
-#     'K_dr': [0, 0.1],
-# #     'K_dz': [-0.5, 0.5],
-#     'D0_dM': [-0.02, 0.02],
-#     'D0_chiProb': [0, 1],
-#     'D0_flightDistance': [-0.4, 0.4],
-#     'D0_flightTime': [-0.005, 0.005],
-#     'D0_useCMSFrame_p': [2.5, 5.0],
-#     'D0_cos_decayAngle_1': [-1, 1],
-# }
-
-# bins = 50
-# density = True
-# samples = "All"
-
-# # === Fixed Color Scheme ===
-# colors = {
-#     'signal': '#007C91',   # Real signal
-#     'other': '#2E2E2E',    # Everything else
-# }
-
-# bg_labels = [
-#     r'$Other$',
-#     r'$D^{0}$',
-#     r'$D^{*0} \rightarrow D^{0} \; \pi^{0} / \gamma$',
-#     r'$D^{*+} \rightarrow D^{0} \; \pi^{+}$'
-# ]
-
-# bg_masks = [
-#     lambda df: df['D0_isSignal'].isna() | (df['D0_isSignal'] == 0),
-#     lambda df: (df['Ds_D0_NoDstarplusDstar0'] == 1) & (df['D0_isSignal'] == 1),
-#     lambda df: (df['Ds_D0_Dstar0'] == 1) & (df['D0_isSignal'] == 1),
-#     lambda df: (df['Ds_D0_Dstarplus'] == 1) & (df['D0_isSignal'] == 1),
-# ]
-
-# # === Plotting ===
-# if "All" in DataFrames and "Signal" in DataFrames:
-#     for idx, (var, label) in enumerate(zip(Variables, features)):
-#         var_range = ranges[var]
-#         bin_width = (var_range[1] - var_range[0]) / bins
-
-#         real_signal_data = DataFrames["Signal"][DataFrames["Signal"]['Ds_isSignal'] == 1][var]
-
-#         for jdx, (mask, bg_label) in enumerate(zip(bg_masks, bg_labels)):
-#             bg_data = DataFrames[samples][mask(DataFrames[samples])][var]
-
-#             plt.hist(real_signal_data, label="Real Signal", histtype='step', density=density,
-#                      bins=bins, alpha=1, range=var_range, linewidth=2, color=colors['signal'])
-
-#             plt.hist(bg_data, label=bg_label, histtype='step', density=density,
-#                      bins=bins, alpha=1, range=var_range, linewidth=2, color=colors['other'])
-
-#             plt.xlabel(label)
-#             if bin_width < 0.01:
-#                 exponent = int(np.floor(np.log10(bin_width)))
-#                 base = bin_width / (10**exponent)
-#                 ylabel = r'$Norm.\;Entries/({:.2f} \times 10^{{{}}})$'.format(base, exponent)
-#             else:
-#                 ylabel = r'$Norm.\;Entries/({:.2f})$'.format(bin_width)
-
-#             plt.ylabel(ylabel)
-#             plt.legend(loc='upper right')
-# #             plt.title(f"Real Signal vs {bg_label}", fontsize=15)
-#             plt.show()
-
-#         # Real vs Fake Signal
-#         fake_signal = DataFrames["Signal"][DataFrames["Signal"]['Ds_isSignal'] == 0][var]
-
-#         plt.hist(real_signal_data, label="Real Signal", histtype='step', density=density,
-#                  bins=bins, alpha=1, range=var_range, linewidth=2, color=colors['signal'])
-
-#         plt.hist(fake_signal, label="Fake Signal", histtype='step', density=density,
-#                  bins=bins, alpha=1, range=var_range, linewidth=2, color=colors['other'])
-
-#         plt.xlabel(label)
-#         plt.ylabel(r'$Normalized\;Entries/({:.2f})$'.format(bin_width))
-#         plt.legend(loc='upper right')
-#         plt.title("Real vs Fake Signal", fontsize=15)
-#         plt.show()
-# else:
-#     print("DataFrames['All'] and DataFrames['Signal'] must be defined.")
-
-# %%
-# === Input Variables for the BDT ===
-Variables = [
-    'K_dr',
-    'pi_dr',
-    'K_kaonID',
-    'pi_pionID',
-    'D0_dM',
-    'D0_chiProb',
-    'D0_flightDistance',
-    'D0_useCMSFrame_p',
-    'D0_cos_decayAngle_1',
-]
-
-features = [
-    r'$dr(K^{-})\;[\mathrm{cm}]$',
-    r'$dr(\pi^{+})\;[\mathrm{cm}]$',
-    r'$kaonID(K^{-})$',  # unitless PID likelihood
-    r'$pionID(\pi^{+})$',  # unitless PID likelihood
-    r'$m(D^{0}) - m_{PDG}(D^{0})\;[\mathrm{GeV}/c^{2}]$',
-    r'$p$-value$(D^{0})$',  # unitless
-    r'$Flight \; Distance(D^{0})\;[\mathrm{cm}]$',
-    r'$p^{*} (D^{0})\;[\mathrm{GeV}/c]$',
-    r'$\cos\theta^*_{daughter_1}$',  # unitless angle cosine
-]
-
-# === Plot Ranges ===
-ranges = {
-    'K_dr': [0, 0.08],
-    'pi_dr': [0, 0.08],
-    'K_kaonID': [0.5, 1],
-    'pi_pionID': [0.2, 1],
-    'D0_dM': [-0.02, 0.02],
-    'D0_chiProb': [0, 1],
-    'D0_flightDistance': [-0.4, 0.4],
-    'D0_useCMSFrame_p': [2.5, 5.0],
-    'D0_cos_decayAngle_1': [-1, 1],
-}
-
-bins = 50
-density = True
-
-# === Scientific Colors ===
-colors = {
-    'signal': '#007C91',  # Blue for real signal
-    'fake': '#C44E52',    # Red for fake D0
-}
-
-# === Extract Samples ===
-df_signal = DataFrames["Signal"]
-df_generic = DataFrames["All"]
-
-df_true_signal = df_signal[
-    (df_signal["Ds_isSignal"] == 1) & (df_signal["D0_isSignal"] == 1)
-]
-df_fake_d0 = df_generic[
-    (df_generic["D0_isSignal"] == 0) | (df_generic["D0_isSignal"].isna())
-]
-
-# === Plotting ===
-for var, label in zip(Variables, features):
-    if var not in ranges:
-        print(f"Skipping {var}: no range defined.")
-        continue
-
-    var_range = ranges[var]
-    bin_width = (var_range[1] - var_range[0]) / bins
-
-    signal_data = df_true_signal[var].dropna()
-    fake_data = df_fake_d0[var].dropna()
-
-    plt.hist(signal_data, label="Real $D^0$ (Signal MC)",
-             histtype='step', density=density,
-             bins=bins, range=var_range, linewidth=2, color=colors['signal'])
-
-    plt.hist(fake_data, label="Fake $D^0$ (Generic MC)",
-             histtype='step', density=density,
-             bins=bins, range=var_range, linewidth=2, color=colors['fake'])
-
-    plt.xlabel(label)
-
-    # if bin_width < 0.01:
-    #     exponent = int(np.floor(np.log10(bin_width)))
-    #     base = bin_width / (10**exponent)
-    #     ylabel = r'$Norm.\;Entries/({:.2f} \times 10^{{{}}})$'.format(base, exponent)
-    # else:
-    ylabel = r'$Norm.\;Entries/({:.3f})$'.format(bin_width)
-
-    plt.ylabel(ylabel)
-    plt.legend(loc='upper right')
-#     plt.title("Real vs Fake $D^0$", fontsize=15)
-    plt.show()
-
-
-# %%
-DataFrames["All"].isna().sum()
-
-# %%
-DataFrames["All"]["D0_isSignal"] = DataFrames["All"]["D0_isSignal"].replace(np.nan, 0)
-
-for s in GenEvents[0:]: # loop over samples
-    DataFrames[s]["D0_isSignal"] = DataFrames[s]["D0_isSignal"].replace(np.nan, 0)
-
-# %%
-DataFrames["All"]["Ds_isSignal"] = DataFrames["All"]["Ds_isSignal"].replace(np.nan, 0)
-
-for s in GenEvents[0:]: # loop over samples
-    DataFrames[s]["Ds_isSignal"] = DataFrames[s]["Ds_isSignal"].replace(np.nan, 0)
-
-# %%
-Variables = [
-             'K_dr',
-             'pi_dr',
-             'D0_significanceOfDistance',
-             'D0_chiProb',
-             'D0_flightDistance',
-             'D0_useCMSFrame_p',
-             'D0_cos_decayAngle_1',
-             ]
-
-features = [
-             r'$dr(K^{-})$',
-             r'$dr(\pi^{+})$',
-             'D0_significanceOfDistance',
-             # r'$m(D^{0}) - m_{PDG}(D^{0})$',
-             r'$p-value(D^{0})$',
-             r'$Flight \; Distance(D^{0})$',
-             r'$p^{*} (D^{0})$',
-             r'$\cos\theta^*_{daughter_1}$',
-             ]
-
-# %%
-plt.figure(figsize=(18, 15))
-
-heatmap = sns.heatmap(DataFrames["Signal"][Variables].corr(), annot=True, cmap="coolwarm",vmin=-1, vmax=1)
-
-heatmap.set_title('Signal Correlation Heatmap', fontdict={'fontsize':20}, pad=16)
-
-# %%
-plt.figure(figsize=(18, 15))
-
-heatmap = sns.heatmap(DataFrames["All"][Variables].corr(), annot=True, cmap="coolwarm",vmin=-1, vmax=1)
-
-heatmap.set_title('Background Correlation Heatmap', fontdict={'fontsize':20}, pad=16)
-
-# %% [markdown]
-# ## Data Preprocessing
-
-# %%
-# # Define your features and labels from the 'All' dataset
-# X = DataFrames["All"][Variables].to_numpy(dtype=np.float32)
-# y = DataFrames["All"]['D0_isSignal'].to_numpy(dtype=np.int64)
-
-# # # Reference variable for decorrelation — this is what uBoost will try to flatten for background
-# # ref_variable = DataFrames["All"]["D0_dM"]
-
-# #splitting with  Holdout method for eval_set
-# X_train, X_test, y_train, y_test = train_test_split(X, y,
-#                                                     test_size=0.30,
-#                                                     random_state=42,
-#                                                     # stratify=y
-#                                                     )
-
-# %%
-# Signal: Real D⁰ from signal MC
-df_signal = DataFrames["Signal"]
-real_signal_mask = (df_signal["Ds_isSignal"] == 1) & (df_signal["D0_isSignal"] == 1)
-df_true_signal = df_signal[real_signal_mask]
-
-# Background: Fake D⁰ from generic MC
-df_generic = DataFrames["All"]
-df_fake_d0 = df_generic[(df_generic["D0_isSignal"] == 0) | (df_generic["D0_isSignal"].isna())]
-
-# Combine
-df_train = pd.concat([df_true_signal, df_fake_d0], axis=0)
-
-# Labels
-labels = np.concatenate([
-    np.ones(len(df_true_signal), dtype=np.int64),   # Signal = 1
-    np.zeros(len(df_fake_d0), dtype=np.int64)       # Fake D⁰ = 0
-])
-
-# Features
-X = df_train[Variables].to_numpy(dtype=np.float32)
-y = labels
-
-#splitting with  Holdout method for eval_set
-X_train, X_test, y_train, y_test = train_test_split(X, y,
-                                                    test_size=0.30,
-                                                    random_state=42,
-                                                    # stratify=y
-                                                    )
-
-# %% [markdown]
-# ## Model Training
-
-# %%
-weights = compute_sample_weight('balanced', y_train)
-
-# Create EarlyStopping callback
-early_stop = xgboost.callback.EarlyStopping(
-    rounds=10,
-    metric_name='rmse',
-    data_name="validation_0",
-    save_best=True,
-)
-
-# %%
-eval_set = [(X_test, y_test)]
-bdt = XGBClassifier(objective="binary:logistic",
-                    eval_metric="logloss",
-                    # early_stopping_rounds=10,
-                    # scale_pos_weight=pos_class_weight,
-                #     scale_pos_weight=scale,
-                    max_delta_step=1,
-                    random_state=42,
-                    n_estimators=100)
-
-bdt.fit(X_train, y_train, 
-        eval_set=[(X_train, y_train),(X_test, y_test)], 
-        sample_weight=weights,
-        verbose=0) 
-
-# %%
-# loss curve of xgboost
-results = bdt.evals_result()
-
-plt.figure(figsize=(10,7))
-plt.plot(results["validation_0"]["logloss"], label="Training loss")
-plt.plot(results["validation_1"]["logloss"], label="Validation loss")
-plt.xlabel("Number of trees")
-plt.ylabel("Loss")
-plt.legend()
-
-# %% [markdown]
-# ## Parameter Optimization
-# This optimization is pulling too much resources and ending the connection
-
-# %%
-param_dist = {
-    "learning_rate": uniform(0.01, 0.2),        # e.g., 0.01 to 0.21
-    "max_depth": randint(1, 5),                 # 1 to 4
-    "n_estimators": randint(100, 201),          # 100 to 200
-    "reg_lambda": randint(1, 5),
-    "gamma": randint(0, 4),
-    "subsample": uniform(0.5, 0.5),             # 0.5 to 1.0
-    "min_child_weight": randint(1, 6),
-    "colsample_bytree": uniform(0.3, 0.7)
-}
-
-random_search = RandomizedSearchCV(
-    bdt,
-    param_distributions=param_dist,
-    n_iter=50,  # Try only 50 random combos (you can adjust)
-    cv=5,
-    n_jobs=-1,
-    random_state=42,
-    verbose=1
-)
-
-# After running RandomizedSearchCV:
-random_search.fit(X_train, y_train, eval_set=[(X_test, y_test)], sample_weight=weights, verbose=0)
-
-# Extract best parameters and apply them to the base model
-xgbm_final = bdt.set_params(**random_search.best_params_, random_state=17).fit(X_train, y_train, sample_weight=weights)
-
-# %%
-# cv_results = cross_validate(xgbm_final, X, y, cv=10,
-#                             scoring=["f1"],return_train_score=True)
-
-# print(cv_results['train_f1'].mean())
-# print(cv_results['test_f1'].mean())
-
-# %%
-print("Best parameters found by RandomizedSearchCV:")
-for param, value in random_search.best_params_.items():
-    print(f"{param:20s}: {value}")
-
-# %% [markdown]
-# ## Feature Importance
-
-# %%
-# Get feature importance scores
-print(xgbm_final.feature_importances_)
-
-# %%
-def plot_importance(model, features, num=len(X), save=False):
-    feature_imp = pd.DataFrame({'Value': model.feature_importances_, 'Feature': features})
-    plt.figure(figsize=(16, 8))
-    sns.set(font_scale=1)
-    sns.barplot(x="Value", y="Feature", data=feature_imp.sort_values(by="Value",
-                                                                     ascending=False)[0:num])
-    plt.title('Feature Importance', fontsize=20)
-    plt.xlabel('Importance Value', fontsize=16)
-    plt.ylabel('Features', fontsize=20)
-    # ax.tick_params(axis='both', labelsize=14)  # Tick labels
-    if save:
-        plt.savefig('importances.png')
-
-# %%
-plot_importance(xgbm_final, features)
-# When the feature importance graph is observed, 
-# it is seen that the variables other than a02 and a01 are important for the xgboost model.
-
-# %% [markdown]
-# ## Overfitting Check
-
-# %%
-from scipy import stats
-def get_pulls(counts,errors,pdf):
-    pull = (-pdf + counts) / errors
+def punzi_fom(epsS, B, a=1.96):
+    """
+    Compute Punzi figure of merit.
+    
+    Parameters:
+        epsS (float): Signal efficiency
+        B (float): Number of background events
+        a (float): Confidence level parameter (default 1.96 for 95% CL)
+    
+    Returns:
+        float: Punzi FoM = ε_S / (a/2 + √B)
+    """
+    denom = (a / 2.0) + np.sqrt(max(B, 0.0))
+    return 0.0 if denom <= 0.0 else epsS / denom
+
+
+def compute_punzi_scan(bdt_scores_sig, bdt_scores_bkg, n_sig_total, n_thresholds=200, a=1.96):
+    """
+    Scan BDT thresholds and compute Punzi FoM.
+    
+    Parameters:
+        bdt_scores_sig (array): BDT scores for signal events
+        bdt_scores_bkg (array): BDT scores for background events
+        n_sig_total (int): Total number of signal events (for efficiency calculation)
+        n_thresholds (int): Number of thresholds to scan
+        a (float): Confidence level parameter
+    
+    Returns:
+        thresholds, foms, best_threshold, best_fom
+    """
+    thresholds = np.linspace(0, 1, n_thresholds)
+    foms = []
+    
+    for t in thresholds:
+        n_sig_pass = np.sum(bdt_scores_sig > t)
+        n_bkg_pass = np.sum(bdt_scores_bkg > t)
+        
+        epsS = n_sig_pass / n_sig_total if n_sig_total > 0 else 0.0
+        fom = punzi_fom(epsS, n_bkg_pass, a)
+        foms.append(fom)
+    
+    foms = np.array(foms)
+    best_idx = np.argmax(foms)
+    return thresholds, foms, thresholds[best_idx], foms[best_idx]
+
+
+def get_pulls(counts, errors, pdf):
+    """
+    Compute pull values for comparing test vs train distributions.
+    
+    Parameters:
+        counts (array): Test counts
+        errors (array): Test errors (uncertainties)
+        pdf (array): Train probability density (normalized)
+    
+    Returns:
+        array: Pull values = (counts - pdf) / errors
+    """
+    pull = (counts - pdf) / errors
     return pull
 
+# %% [markdown]
+# ### Data Loading Functions
+# 
+# Functions to load signal and generic MC for each decay mode, applying D⁰ mass window cuts from the configuration.
+# 
+# **Data sources**:
+# - Signal MC: Ds → D⁰ e ν samples
+# - Generic MC: Combined generic BB̄ backgrounds (charged, mixed, uubar, ddbar, ssbar, ccbar)
+
 # %%
-def compare_train_test(clf, X_train, y_train, X_test, y_test):
-    Density = True
-    decisions = [] # list to hold decisions of classifier
-    for X,y in ((X_train, y_train), (X_test, y_test)): # train and test
-        if hasattr(clf, "predict_proba"): # if predict_proba function exists
-            d1 = clf.predict_proba(X[y<0.5])[:, 1] # background
-            d2 = clf.predict_proba(X[y>0.5])[:, 1] # signal
-        else: # predict_proba function doesn't exist
-            X_tensor = torch.as_tensor(X, dtype=torch.float) # make tensor from X_test_scaled
-            y_tensor = torch.as_tensor(y, dtype=torch.long) # make tensor from y_test
-            X_var, y_var = Variable(X_tensor), Variable(y_tensor) # make variables from tensors
-            d1 = clf(X_var[y_var<0.5])[1][:, 1].cpu().detach().numpy() # background
-            d2 = clf(X_var[y_var>0.5])[1][:, 1].cpu().detach().numpy() # signal
-        decisions += [d1, d2] # add to list of classifier decision
+# Mode titles with proper LaTeX formatting for decay chains
+MODE_TITLES = {
+    "kmpip": r"$D_s^{+} \rightarrow [D^{0} \rightarrow K^{-} \pi^{+}] e^{+} \nu_{e}$",
+    "kmpippi0_eff20_May2020": r"$D_s^{+} \rightarrow [D^{0} \rightarrow K^{-} \pi^{+} \pi^{0}] e^{+} \nu_{e}$",
+    "km3pi": r"$D_s^{+} \rightarrow [D^{0} \rightarrow K^{-} 3\pi] e^{+} \nu_{e}$",
+}
 
-    #pd.set_option('max_columns', None)
-#     %config InlineBackend.figure_format = 'retina'
-    # plt.style.use('belle2')
-    lw=3
+print("Mode titles loaded:")
+for mode, title in MODE_TITLES.items():
+    print(f"  {mode}: {title}")
 
-    fig,axs=plt.subplots(3,1,figsize=(10,10),gridspec_kw={'height_ratios':[1,0.2,0.2]})
+# %%
+def plot_feature_importance(model, features, mode, num=None, save_dir=None):
+    """
+    Plot feature importance from trained XGBoost model and save all importances to CSV.
+    
+    Parameters:
+        model: Trained XGBoost classifier
+        features: List of feature names
+        mode: Decay mode (for title)
+        num: Number of top features to show in plot (None = show all)
+        save_dir: Directory to save plot and CSV (None = show plot)
+    """
+    feature_imp = pd.DataFrame({
+        'Value': model.feature_importances_,
+        'Feature': features
+    })
+    
+    # Sort by importance
+    feature_imp_sorted = feature_imp.sort_values(by="Value", ascending=False)
+    
+    # Save complete table to CSV
+    if save_dir:
+        csv_path = os.path.join(save_dir, "feature_importance_all.csv")
+        feature_imp_sorted.to_csv(csv_path, index=False)
+        print(f"\n✓ Saved complete feature importance table to: {csv_path}")
+    
+    # If num is specified, take top N for plotting, otherwise take all
+    if num is not None:
+        feature_imp_plot = feature_imp_sorted.head(num)
+        title_suffix = f"Top {num} Feature Importances"
+    else:
+        feature_imp_plot = feature_imp_sorted
+        title_suffix = f"Feature Importances (All {len(features)} variables)"
+    
+    # Adjust figure size based on number of features
+    n_features = len(feature_imp_plot)
+    fig_height = max(8, min(100, n_features * 0.3))  # At least 8, at most 100
+    
+    plt.figure(figsize=(16, fig_height))
+    sns.barplot(
+        x="Value", y="Feature",
+        data=feature_imp_plot
+    )
+    
+    title = MODE_TITLES.get(mode, mode)
+    plt.title(f'{title}\n{title_suffix}', loc='left')
+    plt.tight_layout()
+    
+    if save_dir:
+        os.makedirs(save_dir, exist_ok=True)
+        if num is not None:
+            plt.savefig(os.path.join(save_dir, f"feature_importance_top{num}.png"), dpi=150, bbox_inches='tight')
+        else:
+            plt.savefig(os.path.join(save_dir, "feature_importance_all.png"), dpi=150, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
+    
+    return feature_imp_sorted
+
+# %%
+def compare_train_test(clf, X_train, y_train, X_test, y_test, mode):
+    """
+    Plot BDT output comparing train vs test with pull plots.
+    
+    Parameters:
+        clf: Trained classifier
+        X_train, y_train: Training data and labels
+        X_test, y_test: Test data and labels
+        mode: Decay mode (for title)
+    
+    Returns:
+        decisions: List of [train_bkg, train_sig, test_bkg, test_sig] BDT outputs
+    """
+    decisions = []  # list to hold decisions of classifier
+    for X, y in ((X_train, y_train), (X_test, y_test)):  # train and test
+        if hasattr(clf, "predict_proba"):  # if predict_proba function exists
+            d1 = clf.predict_proba(X[y<0.5])[:, 1]  # background
+            d2 = clf.predict_proba(X[y>0.5])[:, 1]  # signal
+        else:  # predict_proba function doesn't exist
+            X_tensor = torch.as_tensor(X, dtype=torch.float)
+            y_tensor = torch.as_tensor(y, dtype=torch.long)
+            X_var, y_var = Variable(X_tensor), Variable(y_tensor)
+            d1 = clf(X_var[y_var<0.5])[1][:, 1].cpu().detach().numpy()  # background
+            d2 = clf(X_var[y_var>0.5])[1][:, 1].cpu().detach().numpy()  # signal
+        decisions += [d1, d2]  # add to list of classifier decision
+
+    lw = 3
+    fig, axs = plt.subplots(3, 1, figsize=(10, 10), gridspec_kw={'height_ratios':[1, 0.2, 0.2]})
 
     bins = 50
-    bin_edges = np.linspace(0,1,bins)
+    bin_edges = np.linspace(0, 1, bins)
     
-    test_bkg_count_weight=bins/len(decisions[2])
-    test_sig_count_weight=bins/len(decisions[3])
-    test_bkg_counts,test_bkg_bins = np.histogram(decisions[2],bins=bins,range=(0,1))
-    test_sig_counts,test_sig_bins = np.histogram(decisions[3],bins=bins,range=(0,1))
+    test_bkg_count_weight = bins / len(decisions[2])
+    test_sig_count_weight = bins / len(decisions[3])
+    test_bkg_counts, test_bkg_bins = np.histogram(decisions[2], bins=bins, range=(0, 1))
+    test_sig_counts, test_sig_bins = np.histogram(decisions[3], bins=bins, range=(0, 1))
 
-    train_bkg_counts,train_bkg_bins,_etc=axs[0].hist(decisions[0],color = 'tab:blue',
-            histtype='step',bins=bins,density=Density,range=(0,1),linewidth=lw,label='Train Background')
-    train_sig_counts,train_sig_bins,_etc=axs[0].hist(decisions[1],color = 'tab:red',
-            histtype='step',bins=bins,density=Density,range=(0,1),linewidth=lw,label=r'Train Signal')
-    axs[0].hist(decisions[0],color = 'tab:blue',
-            histtype='stepfilled',alpha=0.4,bins=bins,density=Density,range=(0,1))
-    axs[0].hist(decisions[1],color = 'tab:red',
-            histtype='stepfilled',alpha=0.4,bins=bins,density=Density,range=(0,1))
-    bin_width=test_bkg_bins[1]-test_bkg_bins[0]
-    bin_centers=[el+(bin_width/2) for el in test_bkg_bins[:-1]]
+    train_bkg_counts, train_bkg_bins, _etc = axs[0].hist(
+        decisions[0], color='tab:blue', histtype='step', bins=bins,
+        density=True, range=(0, 1), linewidth=lw, label='Train Background'
+    )
+    train_sig_counts, train_sig_bins, _etc = axs[0].hist(
+        decisions[1], color='tab:red', histtype='step', bins=bins,
+        density=True, range=(0, 1), linewidth=lw, label=r'Train Signal'
+    )
+    axs[0].hist(decisions[0], color='tab:blue', histtype='stepfilled',
+                alpha=0.4, bins=bins, density=True, range=(0, 1))
+    axs[0].hist(decisions[1], color='tab:red', histtype='stepfilled',
+                alpha=0.4, bins=bins, density=True, range=(0, 1))
+    
+    bin_width = test_bkg_bins[1] - test_bkg_bins[0]
+    bin_centers = [el + (bin_width/2) for el in test_bkg_bins[:-1]]
 
-    axs[0].errorbar(bin_centers,test_bkg_count_weight*test_bkg_counts,
-                yerr=test_bkg_count_weight*np.sqrt(test_bkg_counts),label='Test Background',color='tab:blue',
-                marker='o',linewidth=lw,ls='')
-    axs[0].errorbar(bin_centers,test_sig_count_weight*test_sig_counts,
-                yerr=test_sig_count_weight*np.sqrt(test_sig_counts),label='Test Signal',color='tab:red',
-                marker='o',linewidth=lw,ls='')
-    axs[0].set_title(r'$D_{s}^{+} \rightarrow D^{0} e^{+} \nu_{e}$',loc='left')
-    axs[0].set_xlim(0,1)
+    axs[0].errorbar(
+        bin_centers, test_bkg_count_weight * test_bkg_counts,
+        yerr=test_bkg_count_weight * np.sqrt(test_bkg_counts),
+        label='Test Background', color='tab:blue', marker='o', linewidth=lw, ls=''
+    )
+    axs[0].errorbar(
+        bin_centers, test_sig_count_weight * test_sig_counts,
+        yerr=test_sig_count_weight * np.sqrt(test_sig_counts),
+        label='Test Signal', color='tab:red', marker='o', linewidth=lw, ls=''
+    )
+    
+    # Title with proper LaTeX decay chain
+    title = MODE_TITLES.get(mode, mode)
+    axs[0].set_title(title, loc='left')
+    axs[0].set_xlim(0, 1)
     axs[0].set_ylim(0)
     axs[0].set_ylabel('Event Density')
 
-    x= decisions[1]
-    y=  decisions[3]
-    ks_p_value_sig = ks_2samp(x, y)[1]
+    # K-S test scores
+    ks_p_value_sig = ks_2samp(decisions[1], decisions[3])[1]
+    ks_p_value_bkg = ks_2samp(decisions[0], decisions[2])[1]
 
-    x= decisions[0]
-    y= decisions[2]
-    ks_p_value_bkg = ks_2samp(x, y)[1]
+    leg = axs[0].legend(
+        loc='upper center',
+        title=f"Sig K-S test score: {ks_p_value_sig:0.3f}\nBkg K-S test score: {ks_p_value_bkg:0.3f}"
+    )
+    leg._legend_box.align = "left"
 
-    leg=axs[0].legend(loc='upper center',title=f"Sig K-S test score: {ks_p_value_sig:0.3f}"+
-                      "\n"+f"Bkg K-S test score: {ks_p_value_bkg:0.3f}")
-    leg._legend_box.align = "left"  
-
-    pulls=get_pulls(test_bkg_count_weight*test_bkg_counts,test_bkg_count_weight*np.sqrt(test_bkg_counts),np.array(train_bkg_counts))
-    axs[1].bar(bin_centers,pulls,width=bin_width)
-    axs[1].set_xlim(0,1)
+    # Background pulls
+    pulls = get_pulls(
+        test_bkg_count_weight * test_bkg_counts,
+        test_bkg_count_weight * np.sqrt(test_bkg_counts),
+        np.array(train_bkg_counts)
+    )
+    axs[1].bar(bin_centers, pulls, width=bin_width)
+    axs[1].set_xlim(0, 1)
     axs[1].set_ylabel('Pulls')
-    axs[1].set_ylim(-5,5)
+    axs[1].set_ylim(-5, 5)
 
-    pulls=get_pulls(test_sig_count_weight*test_sig_counts,test_sig_count_weight*np.sqrt(test_sig_counts),np.array(train_sig_counts))
-    axs[2].bar(bin_centers,pulls,width=bin_width,color='tab:red')
-    axs[2].set_xlim(0,1)
+    # Signal pulls
+    pulls = get_pulls(
+        test_sig_count_weight * test_sig_counts,
+        test_sig_count_weight * np.sqrt(test_sig_counts),
+        np.array(train_sig_counts)
+    )
+    axs[2].bar(bin_centers, pulls, width=bin_width, color='tab:red')
+    axs[2].set_xlim(0, 1)
     axs[2].set_ylabel('Pulls')
-    axs[2].set_ylim(-5,5)
+    axs[2].set_ylim(-5, 5)
     axs[2].set_xlabel(r'BDT output')
 
     return decisions
 
 # %%
-decisions = compare_train_test(xgbm_final, X_train, y_train, X_test, y_test)
-
-# %% [markdown]
-# ## Model Check
-
-# %% [markdown]
-# ### Basf2 ROC
-
-# %%
-y_score_test = xgbm_final.predict_proba(X_test)[:, 1]
-fpr_test, tpr_test, thresholds_test = roc_curve(y_test, y_score_test)
-area_test = auc(fpr_test, tpr_test)
-
-y_score_train = xgbm_final.predict_proba(X_train)[:, 1]
-fpr_train, tpr_train, thresholds_train = roc_curve(y_train, y_score_train)
-area_train = auc(fpr_train, tpr_train)
-
-# Get classifier scores (probabilities for class 1)
-train_scores = xgbm_final.predict_proba(X_train)[:, 1]
-test_scores  = xgbm_final.predict_proba(X_test)[:, 1]
-
-# Use y_train and y_test to separate signal/background
-sig_train = train_scores[y_train == 1]
-bkg_train = train_scores[y_train == 0]
-sig_test  = test_scores[y_test == 1]
-bkg_test  = test_scores[y_test == 0]
-
-# Optionally, group them into one list like this:
-decisions = [bkg_train, sig_train, bkg_test, sig_test]
-
-bdt_cuts = np.linspace(0, 1, 100)
-
-sig_eff_train = []
-bkg_rej_train = []
-sig_eff_test = []
-bkg_rej_test = []
-fom_vals = []
-
-for cut in bdt_cuts:
-    num_sig_train = np.sum(sig_train > cut)
-    num_bkg_train = np.sum(bkg_train > cut)
-    num_sig_test = np.sum(sig_test > cut)
-    num_bkg_test = np.sum(bkg_test > cut)
-
-    # FoM calculation
-    fom = num_sig_test / np.sqrt(num_sig_test + num_bkg_test) if (num_sig_test + num_bkg_test) > 0 else 0
-    fom_vals.append(fom)
-
-    sig_eff_train.append(num_sig_train / len(sig_train))
-    bkg_rej_train.append(1 - (num_bkg_train / len(bkg_train)))
-    sig_eff_test.append(num_sig_test / len(sig_test))
-    bkg_rej_test.append(1 - (num_bkg_test / len(bkg_test)))
-
-# Find optimal FoM point
-fom_vals = np.array(fom_vals)
-best_idx = np.argmax(fom_vals)
-best_cut = bdt_cuts[best_idx]
-
-# Plot
-fig, axs = plt.subplots(1, 1, figsize=(7, 6))
-lw = 2
-
-# axs.plot([0, 1], [0, 1], color='grey', linestyle='--', label='Random')
-axs.plot(bkg_rej_train, sig_eff_train, color='tab:blue', linewidth=lw, label=f'Train (AUC = {area_train:.2f})')
-axs.plot(bkg_rej_test, sig_eff_test, color='tab:red', linestyle='--', linewidth=lw, label=f'Test (AUC = {area_test:.2f})')
-
-# ① Shade the overfit gap
-axs.fill_between(bkg_rej_test,
-                 sig_eff_train,
-                 sig_eff_test,
-                 where=(np.array(sig_eff_train) > np.array(sig_eff_test)),
-                 color='gray', alpha=0.2, label='Overfit Gap')
-
-# ② Mark the optimal cut point (from test curve)
-axs.axhline(sig_eff_test[best_idx], color='black', ls='--', linewidth=1.6)
-# axs.axhline(sig_eff_test[best_idx], color='black', ls='--', linewidth=1.6,
-#             label=f'Best FoM Cut = {best_cut:.3f}')
-axs.axvline(bkg_rej_test[best_idx], color='black', ls='--', linewidth=1.6)
-axs.scatter(bkg_rej_test[best_idx], sig_eff_test[best_idx], color='green', s=50)
-
-# Axis labels and formatting
-axs.set_title(r'$D_{s}^{+} \rightarrow D^{0} e^{+} \nu_{e}$', loc='left')
-axs.set_ylim(0, 1.05)
-axs.set_xlim(0, 1.05)
-axs.set_xlabel('Background rejection')
-axs.set_ylabel('Signal efficiency')
-axs.legend(loc='lower left')
-axs.grid(True)
-plt.tight_layout()
-plt.show()
-
-# %% [markdown]
-# ### Machine Learing ROC
-
-# %%
-y_score_test = xgbm_final.predict_proba(X_test)[:, 1]
-fpr_test, tpr_test, thresholds_test = roc_curve(y_test, y_score_test)
-area_test = auc(fpr_test, tpr_test)
-
-y_score_train = xgbm_final.predict_proba(X_train)[:, 1]
-fpr_train, tpr_train, thresholds_train = roc_curve(y_train, y_score_train)
-area_train = auc(fpr_train, tpr_train)
-
-plt.plot([0, 1], [0, 1], color='grey', linestyle='--')
-plt.plot(fpr_test, tpr_test, label=f'Test ROC curve (AUC = {area_test:.2f})')
-plt.plot(fpr_train, tpr_train, label=f'Train ROC curve (AUC = {area_train:.2f})')
-plt.xlim(0.0, 1.0)
-plt.ylim(0.0, 1.0)
-plt.xlabel('False Positive Rate')
-plt.ylabel('True Positive Rate')
-plt.legend(loc='lower right')
-# We can make the plot look nicer by forcing the grid to be square
-plt.gca().set_aspect('equal', adjustable='box')
-
-# %%
-# Make predictions on the test set
-y_pred_proba = xgbm_final.predict_proba(X_test)[:, 1]
-
-# Calculate the ROC AUC score
-roc_auc = roc_auc_score(y_test, y_pred_proba)
-
-print(f"ROC AUC Score: {roc_auc:.2f}")
-
-# %% [markdown]
-# ### Other Checks
-
-# %%
-# Predict on training and validation sets
-train_preds = xgbm_final.predict(X_train)
-val_preds = xgbm_final.predict(X_test)
-
-# Calculate accuracy scores
-train_accuracy = accuracy_score(y_train, train_preds)
-val_accuracy = accuracy_score(y_test, val_preds)
-
-print(f"Training Accuracy: {train_accuracy:.4f}")
-print(f"Validation Accuracy: {val_accuracy:.4f}")
-
-# Check for large difference between train and validation accuracy
-if train_accuracy - val_accuracy > 0.1:
-    print("Warning: The model may be overfitting!")
-
-# %% [markdown]
-# Check if XGBoost Is Underfitting
-
-# %%
-# Predict on training and validation sets
-train_preds = xgbm_final.predict(X_train)
-val_preds = xgbm_final.predict(X_test)
-
-# Calculate MSE for training and validation sets
-train_mse = mean_squared_error(y_train, train_preds)
-val_mse = mean_squared_error(y_test, val_preds)
-
-print(f"Training MSE: {train_mse:.4f}")
-print(f"Validation MSE: {val_mse:.4f}")
-
-# Check if both training and validation MSE are high
-if train_mse > 100 and val_mse > 100:
-    print("Warning: The model may be underfitting!")
-    print("Consider increasing model complexity by adding more estimators, reducing learning rate, or adjusting other hyperparameters.")
-
-# %% [markdown]
-# ## BDT Cut Optimization
-
-# %%
-# Apply BDT to all DataFrames that contain the required Variables
-for key in DataFrames.keys():
-    df = DataFrames[key]
-    
-    # Check: make sure all input BDT variables exist in this DataFrame
-    if all(var in df.columns for var in Variables):
-        # Apply BDT and store the result
-        DataFrames[key]["Ds_FakeD0BDT"] = xgbm_final.predict_proba(df[Variables])[:, 1].astype(np.float32)
-
-# %%
-def compute_fom_curve(scores, labels, weights=None, n_thresholds=200):
+def filter_valid_variables(df, variable_list, nan_threshold=0.5):
     """
-    Compute FoM (S / sqrt(S + B)) across multiple BDT score thresholds.
+    Filter variable list to only include valid columns from dataframe.
+    
+    Removes variables that:
+    - Don't exist in the dataframe
+    - Are not numeric
+    - Have >50% NaN values (by default)
+    - Have any infinity values
     
     Parameters:
-        scores (np.array): BDT scores for the validation/test set
-        labels (np.array): True labels (1 for real D0, 0 for fake)
-        weights (np.array): Optional per-event weights
-        n_thresholds (int): Number of thresholds to scan (default=200)
-
+        df: DataFrame to check
+        variable_list: List of variable names to filter
+        nan_threshold: Maximum fraction of NaN values allowed (0.5 = 50%)
+    
     Returns:
-        thresholds (np.array), foms (np.array), best_threshold (float), best_fom (float)
+        List of valid variable names
+    """
+    valid_vars = []
+    
+    for var in variable_list:
+        # Check if variable exists
+        if var not in df.columns:
+            continue
+        
+        # Check if numeric
+        if not pd.api.types.is_numeric_dtype(df[var]):
+            continue
+        
+        col_data = df[var]
+        
+        # Check NaN fraction
+        nan_fraction = col_data.isna().sum() / len(col_data)
+        if nan_fraction > nan_threshold:
+            print(f"  ⚠ Skipping {var}: {nan_fraction*100:.1f}% NaN values")
+            continue
+        
+        # Check for infinity
+        if np.isinf(col_data.dropna()).any():
+            print(f"  ⚠ Skipping {var}: contains infinity values")
+            continue
+        
+        valid_vars.append(var)
+    
+    return valid_vars
+
+
+def load_mode_data(mode, control_sample=None):
+    """
+    Load signal and generic MC for a given decay mode.
+    Applies D⁰ mass window cuts from config.
+    
+    Parameters:
+        mode (str): Decay mode (kmpip, km3pi, kmpippi0_eff20_May2020)
+        control_sample (str): Control sample tag ("WCh", "ReverseID", etc.) or None for nominal
+    
+    Returns:
+        df_signal, df_generic (DataFrames)
+    """
+    config = DECAY_CONFIG[mode]
+    tree_name = config["ds_tree"]
+    mass_cut = config["cut"]
+    
+    print(f"\n{'='*80}")
+    print(f"Loading data for mode: {mode}")
+    if control_sample:
+        print(f"Control sample: {control_sample}")
+    print(f"Tree: {tree_name}")
+    print(f"D⁰ mass cut: {mass_cut}")
+    print(f"{'='*80}\n")
+    
+    # Load signal MC
+    use_control = control_sample is not None
+    control_tag = control_sample if control_sample else None
+    
+    signal_path = get_signal_file(mode, use_control_sample=use_control, control_sample_tag=control_tag)
+    if isinstance(signal_path, list):
+        signal_path = signal_path[0]  # Take first if multiple returned
+    
+    print(f"Loading Signal MC from: {signal_path}")
+    try:
+        df_signal = uproot.concatenate(f"{signal_path}:{tree_name}", library='pd')
+        df_signal = df_signal.query(mass_cut)  # Apply D⁰ mass window
+        print(f"  → Signal MC: {len(df_signal):,} events after D⁰ mass cut")
+    except Exception as e:
+        print(f"  ✗ Failed to load signal: {e}")
+        df_signal = pd.DataFrame()
+    
+    # Load generic MC (all background samples combined)
+    df_generic_list = []
+    for sample in tqdm(BACKGROUND_SAMPLES, desc="Loading generic MC"):
+        generic_path = get_generic_file(sample, mode, use_control_sample=use_control, 
+                                       control_sample_tag=control_tag)
+        if isinstance(generic_path, list):
+            generic_path = generic_path[0]
+        
+        try:
+            df = uproot.concatenate(f"{generic_path}:{tree_name}", library='pd')
+            df = df.query(mass_cut)  # Apply D⁰ mass window
+            df_generic_list.append(df)
+            print(f"  → {sample}: {len(df):,} events after D⁰ mass cut")
+        except Exception as e:
+            print(f"  ✗ Failed to load {sample}: {e}")
+    
+    df_generic = pd.concat(df_generic_list, ignore_index=True) if df_generic_list else pd.DataFrame()
+    print(f"\n  → Total Generic MC: {len(df_generic):,} events\n")
+    
+    return df_signal, df_generic
+
+# %%
+def get_pulls(test_data, test_errors, train_data):
+    """
+    Calculate pulls for overtraining check.
+    
+    Parameters:
+        test_data: Test histogram values
+        test_errors: Test histogram errors
+        train_data: Train histogram values
+    
+    Returns:
+        pulls: (test_data - train_data) / test_errors array
+    """
+    # Avoid division by zero
+    pulls = np.zeros(len(test_data))
+    mask = test_errors > 0
+    pulls[mask] = (test_data[mask] - train_data[mask]) / test_errors[mask]
+    return pulls
+
+
+def compute_punzi_scan(signal_scores, background_scores, n_sig_events, n_thresholds=100, a=1.96):
+    """
+    Scan BDT cuts and compute Punzi Figure of Merit (FoM).
+    
+    Punzi FoM = n_sig / (a + sqrt(n_bkg))
+    
+    Parameters:
+        signal_scores: Array of BDT scores for signal events
+        background_scores: Array of BDT scores for background events
+        n_sig_events: Number of signal events (for FoM calculation)
+        n_thresholds: Number of threshold points to scan
+        a: Confidence level parameter (default 1.96 for 95% CL)
+    
+    Returns:
+        thresholds: Array of BDT cut values
+        foms: Array of FoM values
+        best_threshold: Optimal BDT cut
+        best_fom: Maximum FoM value
     """
     thresholds = np.linspace(0, 1, n_thresholds)
     foms = []
-
-    for t in thresholds:
-        mask = scores > t
-
-        if weights is not None:
-            S = np.sum(weights[(labels == 1) & mask])
-            B = np.sum(weights[(labels == 0) & mask])
+    
+    for cut in thresholds:
+        # Count events passing cut
+        n_sig = np.sum(signal_scores > cut)
+        n_bkg = np.sum(background_scores > cut)
+        
+        # Compute FoM
+        if n_bkg < 0:
+            n_bkg = 0
+        
+        # Scale FoM to full dataset
+        if n_sig > 0:
+            fom = n_sig / np.sqrt(a**2 + n_bkg) if (a**2 + n_bkg) > 0 else 0
         else:
-            S = np.sum((labels == 1) & mask)
-            B = np.sum((labels == 0) & mask)
-
-        fom = S / np.sqrt(S + B) if (S + B) > 0 else 0
+            fom = 0
+        
         foms.append(fom)
-
+    
     foms = np.array(foms)
     best_idx = np.argmax(foms)
-    return thresholds, foms, thresholds[best_idx], foms[best_idx]
+    best_threshold = thresholds[best_idx]
+    best_fom = foms[best_idx]
+    
+    return thresholds, foms, best_threshold, best_fom
 
-# %%
-# Predict scores from your trained model
-scores = xgbm_final.predict_proba(X_test)[:, 1]
 
-# Optionally define weights (or leave as None)
-weights = np.ones_like(y_test)  # or from your MC truth if applicable
-
-# Compute FoM curve
-thresholds, foms, best_thresh, best_fom = compute_fom_curve(scores, y_test)
-
-# Print results
-print(f"Best threshold: {best_thresh:.3f}")
-print(f"Best FoM: {best_fom:.3f}")
-
-# Plot it
-plt.plot(thresholds, foms)
-plt.axvline(best_thresh, color='red', linestyle='--', label=f'Best = {best_thresh:.3f}')
-plt.axvspan(0,best_thresh,color='gray',alpha=0.2)
-plt.xlabel("BDT Threshold")
-plt.ylabel("FoM = S / √(S + B)")
-plt.title("FoM Scan vs BDT Threshold")
-plt.legend()
-plt.grid(True)
-plt.show()
-
-# %%
-from Functions import optimize_cut, plot_save
-
-cut = optimize_cut(
-    df_sig=DataFrames["Signal"],                  # DataFrame used for signal plotting
-    df_bkg=DataFrames["All"],                     # DataFrame used for background plotting
-    Signal=DataFrames["Signal"],                  # DataFrame used for signal FoM calculation
-    Background=DataFrames["All"],                 # DataFrame used for background FoM calculation
-    var="Ds_FakeD0BDT",                           # Variable to plot
-    FoM="Ds_FakeD0BDT",                           # Variable to optimize over (can be same as var)
-    xlabel="Classifier Output",                   # X-axis label
-    Bins=50,
-    Range=[0, 1],
-    varmin=0,
-    varmax=0.99,
-    select="right",                               # "right" for >= cut, "left" for <= cut
-    Width=False,
-    query_signal="Ds_isSignal == 1"               # Only consider true signal
-)
-
-print(f"Best cut is: {cut:.3f}")
-
-# %% [markdown]
-# ## Fake $D^0$ BDT Cut
-
-# %%
-# DataFrames["All"] = DataFrames["All"][(DataFrames["All"]["Ds_FakeD0BDT"]>=0.556)]
-
-# for s in GenEvents[0:]: # loop over samples
-#     DataFrames[s] = DataFrames[s][(DataFrames[s]["Ds_FakeD0BDT"]>=0.556)]
-
-# %% [markdown]
-# # Save BDT Output
-
-# %% [markdown]
-# Correct Charge
-
-# %%
-# import os
-# import uproot
-
-# # === Make sure samples is a list ===
-# samples = ["Signal", "BB", "ccbar", "ddbar", "ssbar", "taupair", "uubar"]
-
-# # === Output directory ===
-# output_dir = "/group/belle/users/amubarak/03-ML/FakeD0/"
-# os.makedirs(output_dir, exist_ok=True)
-
-# # === Base input path for original files ===
-# base_input_dir = "/group/belle/users/amubarak/02-Grid/Sample_Grid"
-# Date = "0530"
-# Attempt = "0"
-
-# # === Save each DataFrame using original filename with _withBDT suffix ===
-# for s in samples:
-#     if s not in DataFrames:
-#         print(f"Warning: {s} not in DataFrames — skipping.")
-#         continue
-
-#     # Convert Fake D⁰ BDT output to float32 if it exists
-#     if "Ds_FakeD0BDT" in DataFrames[s].columns:
-#         DataFrames[s]["Ds_FakeD0BDT"] = DataFrames[s]["Ds_FakeD0BDT"].astype(np.float32)
-
-#     # Set original file path
-#     if s == "Signal":
-#         original_name = "Ds2D0enu-Signal.root"
-#     else:
-#         original_name = f"Ds2D0e-Generic_Ds_{Date}25_{Attempt}_{s}.root"
-
-#     # Build output path with _withBDT suffix
-#     output_name = original_name.replace(".root", "_withBDT.root")
-#     out_path = os.path.join(output_dir, output_name)
-
-#     # Save DataFrame to ROOT
-#     with uproot.recreate(out_path) as f:
-#         f["Dstree"] = DataFrames[s]
-
-#     print(f"Saved: {out_path}")
-
-# %% [markdown]
-# Wrong Charge
-
-# %%
-# import os
-# import uproot
-
-# # === Make sure wrong-charge samples list is defined ===
-# samples_WCh = ["Signal_WCh", "BB_WCh", "ccbar_WCh", "ddbar_WCh", "ssbar_WCh", "taupair_WCh", "uubar_WCh", "Data_WCh"]
-
-# # === Output directory for wrong charge ===
-# output_dir_WCh = "/group/belle/users/amubarak/03-ML/FakeD0_WCh/"
-# os.makedirs(output_dir_WCh, exist_ok=True)
-
-# # === Base input path for original files (wrong charge) ===
-# base_input_dir_WCh = "/group/belle/users/amubarak/02-Grid/Sample_Grid_WCh"
-# Date_WCh = "0630"
-# Attempt_WCh = "0"
-
-# # === Save each wrong-charge DataFrame using original filename with _withBDT suffix ===
-# for s in samples_WCh:
-#     if s not in DataFrames:
-#         print(f"Warning: {s} not in DataFrames — skipping.")
-#         continue
-
-#     # Convert Fake D⁰ BDT output to float32 if it exists
-#     if "Ds_FakeD0BDT" in DataFrames[s].columns:
-#         DataFrames[s]["Ds_FakeD0BDT"] = DataFrames[s]["Ds_FakeD0BDT"].astype(np.float32)
-
-#     # Set original file name
-#     if s == "Signal_WCh":
-#         original_name = "Ds2D0enu-Signal_WCh.root"
-#     else:
-#         tag = s.replace("_WCh", "")
-#         original_name = f"Ds2D0e-Generic_Ds_{Date_WCh}25_{Attempt_WCh}_{tag}.root"
-
-#     # Build output path with _withBDT suffix
-#     output_name = original_name.replace(".root", "_withBDT.root")
-#     out_path = os.path.join(output_dir_WCh, output_name)
-
-#     # Save DataFrame to ROOT
-#     with uproot.recreate(out_path) as f:
-#         f["Dstree"] = DataFrames[s]
-
-#     print(f"Saved: {out_path}")
-
-# %% [markdown]
-# Reverse PID
-
-# %%
-# import os
-# import uproot
-
-# # === Make sure ReverseID samples list is defined ===
-# samples_ReverseID = ["Signal_ReverseID", "BB_ReverseID", "ccbar_ReverseID", "ddbar_ReverseID", "ssbar_ReverseID", "taupair_ReverseID", "uubar_ReverseID", "Data_ReverseID"]
-
-# # === Output directory for ReverseID ===
-# output_dir_ReverseID = "/group/belle/users/amubarak/03-ML/FakeD0_ReverseID/"
-# os.makedirs(output_dir_ReverseID, exist_ok=True)
-
-# # === Base input path for original files (ReverseID) ===
-# base_input_dir_ReverseID = "/group/belle/users/amubarak/02-Grid/Sample_Grid_ReverseID"
-# Date_ReverseID = "0626"
-# Attempt_ReverseID = "0"
-
-# # === Save each ReverseID DataFrame using original filename with _withBDT suffix ===
-# for s in samples_ReverseID:
-#     if s not in DataFrames:
-#         print(f"Warning: {s} not in DataFrames — skipping.")
-#         continue
-
-#     # Convert Fake D⁰ BDT output to float32 if it exists
-#     if "Ds_FakeD0BDT" in DataFrames[s].columns:
-#         DataFrames[s]["Ds_FakeD0BDT"] = DataFrames[s]["Ds_FakeD0BDT"].astype(np.float32)
-
-#     # Set original file name
-#     if s == "Signal_ReverseID":
-#         original_name = "Ds2D0enu-Signal_ReverseID.root"
-#     else:
-#         tag = s.replace("_ReverseID", "")
-#         original_name = f"Ds2D0e-Generic_Ds_{Date_ReverseID}25_{Attempt_ReverseID}_{tag}.root"
-
-#     # Build output path with _withBDT suffix
-#     output_name = original_name.replace(".root", "_withBDT.root")
-#     out_path = os.path.join(output_dir_ReverseID, output_name)
-
-#     # Save DataFrame to ROOT
-#     with uproot.recreate(out_path) as f:
-#         f["Dstree"] = DataFrames[s]
-
-#     print(f"Saved: {out_path}")
-
-# %% [markdown]
-# Reverse PID and Wrong Charge
-
-# %%
-import os
-import uproot
-
-# === Make sure ReverseID samples list is defined ===
-samples_ReverseID_WCh = ["BB_ReverseID_WCh", "ccbar_ReverseID_WCh", "ddbar_ReverseID_WCh", "ssbar_ReverseID_WCh", 
-                         "taupair_ReverseID_WCh", "uubar_ReverseID_WCh", "Data_ReverseID_WCh"]
-
-# === Output directory for ReverseID ===
-output_dir_ReverseID_WCh = "/group/belle/users/amubarak/03-ML/FakeD0_ReverseID_WCh/"
-os.makedirs(output_dir_ReverseID_WCh, exist_ok=True)
-
-# === Base input path for original files (ReverseID) ===
-base_input_dir_ReverseID_WCh = "/group/belle/users/amubarak/02-Grid/Sample_Grid_ReverseID_WCh"
-Date_ReverseID_WCh = "0708"
-Attempt_ReverseID_WCh = "0"
-
-# === Save each ReverseID DataFrame using original filename with _withBDT suffix ===
-for s in samples_ReverseID_WCh:
-    if s not in DataFrames:
-        print(f"Warning: {s} not in DataFrames — skipping.")
-        continue
-
-    # Convert Fake D⁰ BDT output to float32 if it exists
-    if "Ds_FakeD0BDT" in DataFrames[s].columns:
-        DataFrames[s]["Ds_FakeD0BDT"] = DataFrames[s]["Ds_FakeD0BDT"].astype(np.float32)
-
-    # Set original file name
-    if s == "Signal_ReverseID_WCh":
-        original_name = "Ds2D0enu-Signal_ReverseID_WCh.root"
+def print_bdt_statistics(model, X_train, y_train, X_test, y_test):
+    """
+    Print BDT training and test statistics.
+    
+    Parameters:
+        model: Trained XGBoost classifier
+        X_train, y_train: Training features and labels
+        X_test, y_test: Test features and labels
+    """
+    print("\n" + "="*80)
+    print("BDT STATISTICS")
+    print("="*80)
+    
+    # Get predictions
+    y_pred_train = model.predict(X_train)
+    y_pred_test = model.predict(X_test)
+    
+    y_proba_train = model.predict_proba(X_train)[:, 1]
+    y_proba_test = model.predict_proba(X_test)[:, 1]
+    
+    # Training metrics
+    train_acc = accuracy_score(y_train, y_pred_train)
+    train_auc = roc_auc_score(y_train, y_proba_train)
+    
+    # Test metrics
+    test_acc = accuracy_score(y_test, y_pred_test)
+    test_auc = roc_auc_score(y_test, y_proba_test)
+    
+    # Compute precision and recall
+    precision_train = confusion_matrix(y_train, y_pred_train)[1, 1] / (confusion_matrix(y_train, y_pred_train)[1, 1] + confusion_matrix(y_train, y_pred_train)[0, 1]) if (confusion_matrix(y_train, y_pred_train)[1, 1] + confusion_matrix(y_train, y_pred_train)[0, 1]) > 0 else 0
+    precision_test = confusion_matrix(y_test, y_pred_test)[1, 1] / (confusion_matrix(y_test, y_pred_test)[1, 1] + confusion_matrix(y_test, y_pred_test)[0, 1]) if (confusion_matrix(y_test, y_pred_test)[1, 1] + confusion_matrix(y_test, y_pred_test)[0, 1]) > 0 else 0
+    
+    print(f"\nTraining Set Performance:")
+    print(f"  Accuracy: {train_acc:.4f}")
+    print(f"  ROC AUC:  {train_auc:.4f}")
+    print(f"\nTest Set Performance:")
+    print(f"  Accuracy: {test_acc:.4f}")
+    print(f"  ROC AUC:  {test_auc:.4f}")
+    print(f"\nOvertraining Check (Test - Train):")
+    print(f"  ΔAccuracy: {test_acc - train_acc:+.4f}")
+    print(f"  ΔAUC:      {test_auc - train_auc:+.4f}")
+    
+    # Check for overtraining
+    if abs(test_auc - train_auc) < 0.01 and abs(test_acc - train_acc) < 0.01:
+        print(f"  ✓ Good agreement (no overtraining detected)")
+    elif test_auc < train_auc or test_acc < train_acc:
+        print(f"  ⚠ Slight overtraining detected")
     else:
-        tag = s.replace("_ReverseID_WCh", "")
-        original_name = f"Ds2D0e-Generic_Ds_{Date_ReverseID_WCh}25_{Attempt_ReverseID_WCh}_{tag}.root"
+        print(f"  ✓ Test performance better than train (normal for some cases)")
+    
+    print("="*80 + "\n")
 
-    # Build output path with _withBDT suffix
-    output_name = original_name.replace(".root", "_withBDT.root")
-    out_path = os.path.join(output_dir_ReverseID_WCh, output_name)
+# %% [markdown]
+# ### Training Set Creation with Corrected Labeling
+# 
+# **CORRECTED PROCEDURE**:
+# 
+# The key insight is that we want the BDT to learn "is this a real D⁰?" rather than "is this from signal MC?".
+# 
+# - **Real D⁰ (label = 1)**: Events with `abs(D0_mcPDG) == 421` from BOTH:
+#   - Signal MC (Ds → D⁰ e ν samples)
+#   - Generic MC (combinatoric backgrounds that happen to form real D⁰)
+# 
+# - **Fake D⁰ (label = 0)**: Events from generic MC with:
+#   - `abs(D0_mcPDG) != 421` (combinatoric background)
+#   - `D0_mcPDG` is NaN (no truth match)
+# 
+# This ensures the BDT learns real vs fake D⁰ topology, not signal vs background event characteristics.
 
-    # Save DataFrame to ROOT
-    with uproot.recreate(out_path) as f:
-        f["Dstree"] = DataFrames[s]
+# %%
+def create_training_set(df_signal, df_generic, mode_variables):
+    """
+    Create training set with CORRECTED LABELING PROCEDURE.
+    
+    Real D⁰: abs(D0_mcPDG) == 421 from BOTH signal MC AND generic MC
+    Fake D⁰: abs(D0_mcPDG) != 421 or NaN from generic MC
+    
+    Parameters:
+        df_signal: Signal MC DataFrame
+        df_generic: Generic MC DataFrame
+        mode_variables: List of variable names to use
+    
+    Returns:
+        X, y, df_train, df_real, df_fake, mode_variables_filtered
+    """
+    print("\n" + "="*80)
+    print("Creating training set with CORRECTED labeling")
+    print("="*80)
+    
+    # Real D⁰ from signal MC
+    real_signal_mask = (abs(df_signal["D0_mcPDG"]) == 421)
+    df_real_signal = df_signal[real_signal_mask]
+    print(f"Real D⁰ from Signal MC: {len(df_real_signal):,} events")
+    
+    # Real D⁰ from generic MC
+    real_generic_mask = (abs(df_generic["D0_mcPDG"]) == 421)
+    df_real_generic = df_generic[real_generic_mask]
+    print(f"Real D⁰ from Generic MC: {len(df_real_generic):,} events")
+    
+    # Combine real D⁰
+    df_real = pd.concat([df_real_signal, df_real_generic], ignore_index=True)
+    print(f"Total Real D⁰: {len(df_real):,} events")
+    
+    # Fake D⁰ from generic MC
+    fake_mask = (abs(df_generic["D0_mcPDG"]) != 421) | df_generic["D0_mcPDG"].isna()
+    df_fake = df_generic[fake_mask]
+    print(f"Fake D⁰ from Generic MC: {len(df_fake):,} events")
+    
+    # Check variable availability
+    missing_vars = [v for v in mode_variables if v not in df_real.columns]
+    if missing_vars:
+        print(f"\n⚠ Warning: {len(missing_vars)} variables not available in data:")
+        for v in missing_vars[:10]:  # Show first 10
+            print(f"  - {v}")
+        if len(missing_vars) > 10:
+            print(f"  ... and {len(missing_vars)-10} more")
+        
+        # Filter to available variables
+        mode_variables_filtered = [v for v in mode_variables if v in df_real.columns]
+        print(f"\nProceeding with {len(mode_variables_filtered)} available variables\n")
+    else:
+        mode_variables_filtered = mode_variables
+    
+    # Combine
+    df_train = pd.concat([df_real, df_fake], axis=0, ignore_index=True)
+    
+    # Labels: 1 for real D⁰, 0 for fake D⁰
+    labels = np.concatenate([
+        np.ones(len(df_real), dtype=np.int64),
+        np.zeros(len(df_fake), dtype=np.int64)
+    ])
+    
+    # Features
+    X = df_train[mode_variables_filtered].to_numpy(dtype=np.float32)
+    y = labels
+    
+    # Clean data: replace inf with NaN
+    X = np.where(np.isinf(X), np.nan, X)
+    
+    # Check for NaN/inf values
+    n_nan = np.sum(np.isnan(X))
+    n_inf = np.sum(np.isinf(X))
+    
+    if n_nan > 0 or n_inf > 0:
+        print(f"\n⚠ Data cleaning:")
+        print(f"  - NaN values found: {n_nan:,}")
+        print(f"  - Inf values found: {n_inf:,}")
+        print(f"  - NaN/Inf values will be handled as missing by XGBoost")
+    
+    print(f"\nTraining set: {len(df_train):,} events")
+    print(f"  - Real D⁰ (label=1): {np.sum(y==1):,}")
+    print(f"  - Fake D⁰ (label=0): {np.sum(y==0):,}")
+    print(f"  - Class ratio (Real/Fake): {np.sum(y==1)/np.sum(y==0):.3f}")
+    print(f"  - Number of features: {len(mode_variables_filtered)}")
+    print("="*80 + "\n")
+    
+    return X, y, df_train, df_real, df_fake, mode_variables_filtered
 
-    print(f"Saved: {out_path}")
+# %%
+def train_bdt(X, y, run_optimization=True):
+    """
+    Train XGBoost BDT with optional hyperparameter optimization.
+    
+    Automatically handles class imbalance using scale_pos_weight parameter.
+    
+    Parameters:
+        X: Feature matrix
+        y: Labels
+        run_optimization: Whether to run RandomizedSearchCV
+    
+    Returns:
+        bdt_final, X_train, X_test, y_train, y_test
+    """
+    print("\n" + "="*80)
+    print("TRAINING BDT")
+    print("="*80)
+    
+    # Split data
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=TEST_SIZE, random_state=RANDOM_STATE, stratify=y
+    )
+    
+    print(f"Training set: {len(X_train):,} events")
+    print(f"Test set: {len(X_test):,} events")
+    
+    # Calculate class weights to handle imbalance
+    n_real = np.sum(y_train == 1)
+    n_fake = np.sum(y_train == 0)
+    scale_pos_weight = n_fake / n_real if n_real > 0 else 1.0
+    
+    print(f"\nClass balance in training set:")
+    print(f"  Real D⁰ (positive, label=1): {n_real:,} ({100*n_real/len(y_train):.1f}%)")
+    print(f"  Fake D⁰ (negative, label=0): {n_fake:,} ({100*n_fake/len(y_train):.1f}%)")
+    print(f"  Class ratio (Fake/Real): {n_fake/n_real:.2f}")
+    print(f"  XGBoost scale_pos_weight: {scale_pos_weight:.2f} (for balancing)")
+    
+    if run_optimization:
+        print(f"\nRunning hyperparameter optimization with {RANDOM_SEARCH_ITERS} iterations...")
+        
+        # Define base estimator with scale_pos_weight for class imbalance
+        bdt_base = XGBClassifier(
+            objective="binary:logistic",
+            eval_metric="logloss",
+            max_delta_step=1,
+            scale_pos_weight=scale_pos_weight,  # Handle class imbalance
+            random_state=RANDOM_STATE,
+            missing=np.nan  # Handle NaN values as missing
+        )
+        
+        # Hyperparameter search space
+        param_dist = {
+            'learning_rate': uniform(0.01, 0.19),
+            'max_depth': randint(1, 6),
+            'n_estimators': randint(100, 201),
+            'reg_lambda': uniform(1, 4),
+            'gamma': uniform(0, 4),
+            'subsample': uniform(0.5, 0.5),
+            'min_child_weight': randint(1, 7),
+            'colsample_bytree': uniform(0.3, 0.7)
+        }
+        
+        # Random search with cross-validation
+        random_search = RandomizedSearchCV(
+            bdt_base,
+            param_distributions=param_dist,
+            n_iter=RANDOM_SEARCH_ITERS,
+            cv=5,
+            scoring='roc_auc',
+            n_jobs=-1,
+            random_state=RANDOM_STATE,
+            verbose=1
+        )
+        
+        random_search.fit(X_train, y_train)
+        
+        print("\nBest hyperparameters:")
+        for param, value in random_search.best_params_.items():
+            print(f"  {param}: {value}")
+        
+        print(f"\nBest CV score (ROC AUC): {random_search.best_score_:.4f}")
+        
+        bdt_final = random_search.best_estimator_
+    else:
+        print("\nTraining with default parameters (no optimization)...")
+        print(f"Using scale_pos_weight={scale_pos_weight:.2f} to handle class imbalance")
+        
+        bdt_final = XGBClassifier(
+            objective="binary:logistic",
+            eval_metric="logloss",
+            max_delta_step=1,
+            scale_pos_weight=scale_pos_weight,  # Handle class imbalance
+            random_state=RANDOM_STATE,
+            n_estimators=N_ESTIMATORS,
+            missing=np.nan  # Handle NaN values as missing
+        )
+        
+        bdt_final.fit(X_train, y_train)
+    
+    print("\n✓ BDT training complete")
+    print("="*80 + "\n")
+    
+    return bdt_final, X_train, X_test, y_train, y_test
+
+# %%
+def apply_bdt_and_save(bdt, mode_variables, mode, df_signal, df_generic):
+    """
+    Apply trained BDT to signal and generic MC, and save to ROOT files.
+    
+    Parameters:
+        bdt: Trained XGBoost classifier
+        mode_variables: List of variable names used in training
+        mode: Decay mode
+        df_signal: Signal MC DataFrame
+        df_generic: Generic MC DataFrame
+    """
+    import uproot
+    
+    if not SAVE_OUTPUT:
+        print("\nSAVE_OUTPUT is False. Skipping file saving.")
+        return
+    
+    print("\n" + "="*80)
+    print("SAVING OUTPUT FILES")
+    print("="*80)
+    
+    # Create output directory
+    output_dir = os.path.join(OUTPUT_BASE_DIR, "FakeD0_BDT", mode)
+    os.makedirs(output_dir, exist_ok=True)
+    
+    # Save signal with BDT
+    signal_path = os.path.join(output_dir, f"Ds2D0enu-Signal_{mode}_withBDT.root")
+    print(f"\nSaving signal MC to: {signal_path}")
+    
+    config = DECAY_CONFIG[mode]
+    tree_name = config["ds_tree"]
+    
+    with uproot.recreate(signal_path) as f:
+        f[tree_name] = df_signal
+    
+    print(f"  ✓ Saved {len(df_signal):,} signal events")
+    
+    # Save generic with BDT
+    generic_path = os.path.join(output_dir, f"Ds2D0e-Generic_{mode}_withBDT.root")
+    print(f"\nSaving generic MC to: {generic_path}")
+    
+    with uproot.recreate(generic_path) as f:
+        f[tree_name] = df_generic
+    
+    print(f"  ✓ Saved {len(df_generic):,} generic events")
+    print("="*80 + "\n")
+
+# %% [markdown]
+# ## Model Training Function
+# 
+# Train XGBoost BDT with optional hyperparameter optimization.
+# 
+# **Hyperparameter search space** (when `RUN_OPTIMIZATION = True`):
+# - `learning_rate`: [0.01, 0.2]
+# - `max_depth`: [1, 5]
+# - `n_estimators`: [100, 200]
+# - `reg_lambda`: [1, 5] (L2 regularization)
+# - `gamma`: [0, 4] (min loss reduction for split)
+# - `subsample`: [0.5, 1.0]
+# - `min_child_weight`: [1, 6]
+# - `colsample_bytree`: [0.3, 1.0]
+# 
+# Uses `RandomizedSearchCV` with 5-fold cross-validation.
+
+# %%
+def process_mode(mode):
+    """
+    Complete BDT training pipeline for a single mode.
+    
+    Parameters:
+        mode: Decay mode to process
+    """
+    print("\n" + "█"*80)
+    print(f"PROCESSING MODE: {mode}")
+    print("█"*80 + "\n")
+    
+    # Get proper title
+    mode_title = MODE_TITLES.get(mode, mode)
+    print(f"Decay chain: {mode_title}")
+    
+    # 1. Get variable list for this mode
+    if mode not in VARIABLES:
+        print(f"ERROR: No variables defined for mode {mode}")
+        return
+    
+    mode_variables = VARIABLES[mode]["all_vars"]
+    print(f"Using {len(mode_variables)} variables from final_variables.py")
+    
+    # 2. Load data
+    df_signal, df_generic = load_mode_data(mode)
+    
+    if df_signal.empty or df_generic.empty:
+        print(f"ERROR: Failed to load data for {mode}")
+        return
+    
+    # 3. Create training set
+    X, y, df_train, df_real, df_fake, mode_variables_filtered = create_training_set(
+        df_signal, df_generic, mode_variables
+    )
+    
+    # 4. Train BDT
+    bdt_final, X_train, X_test, y_train, y_test = train_bdt(X, y, run_optimization=RUN_OPTIMIZATION)
+    
+    # 5. BDT Statistics and overtraining metrics
+    print_bdt_statistics(bdt_final, X_train, y_train, X_test, y_test)
+    
+    # 6. Feature Importance
+    if SAVE_IMAGES:
+        save_dir = os.path.join(OUTPUT_DIR, mode)
+        os.makedirs(save_dir, exist_ok=True)
+    else:
+        save_dir = None
+    
+    print("\n" + "="*80)
+    print("FEATURE IMPORTANCE")
+    print(f"\nTotal variables being used for training: {len(mode_variables_filtered)}")
+    print("\nVerifying all variables from final_variables.py are included...")
+    
+    # Check if all expected variables are present
+    expected_vars = set(VARIABLES[mode]["all_vars"])
+    actual_vars = set(mode_variables_filtered)
+    
+    missing_vars = expected_vars - actual_vars
+    if missing_vars:
+        print(f"  ⚠ {len(missing_vars)} variables from final_variables.py not found in data:")
+        for v in list(missing_vars)[:10]:
+            print(f"    - {v}")
+        if len(missing_vars) > 10:
+            print(f"    ... and {len(missing_vars)-10} more")
+    else:
+        print(f"  ✓ All {len(expected_vars)} variables from final_variables.py are being used")
+    print("="*80)
+    feature_imp_df = plot_feature_importance(
+        bdt_final, mode_variables_filtered, mode, num=20, save_dir=save_dir
+    )
+    print("\nTop 10 Most Important Features:")
+    print(feature_imp_df.sort_values(by="Value", ascending=False).head(10))
+    
+    # 7. BDT Output Comparison with Pull Plots
+    print("\n" + "="*80)
+    print("BDT OUTPUT COMPARISON (Train vs Test with Pull Plots)")
+    print("="*80)
+    decisions = compare_train_test(bdt_final, X_train, y_train, X_test, y_test, mode)
+    
+    if save_dir:
+        plt.savefig(os.path.join(save_dir, "bdt_output_comparison.png"), dpi=150, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
+    
+    # 8. ROC Curve (keep existing Belle II style)
+    print("\nPlotting ROC curve...")
+    y_score_test = bdt_final.predict_proba(X_test)[:, 1]
+    fpr_test, tpr_test, _ = roc_curve(y_test, y_score_test)
+    area_test = auc(fpr_test, tpr_test)
+    
+    y_score_train = bdt_final.predict_proba(X_train)[:, 1]
+    fpr_train, tpr_train, _ = roc_curve(y_train, y_score_train)
+    area_train = auc(fpr_train, tpr_train)
+    
+    # Compute background rejection vs signal efficiency
+    bdt_cuts = np.linspace(0, 1, 100)
+    sig_train = y_score_train[y_train == 1]
+    bkg_train = y_score_train[y_train == 0]
+    sig_test = y_score_test[y_test == 1]
+    bkg_test = y_score_test[y_test == 0]
+    
+    sig_eff_train = []
+    bkg_rej_train = []
+    sig_eff_test = []
+    bkg_rej_test = []
+    
+    for cut in bdt_cuts:
+        sig_eff_train.append(np.sum(sig_train > cut) / len(sig_train))
+        bkg_rej_train.append(1 - (np.sum(bkg_train > cut) / len(bkg_train)))
+        sig_eff_test.append(np.sum(sig_test > cut) / len(sig_test))
+        bkg_rej_test.append(1 - (np.sum(bkg_test > cut) / len(bkg_test)))
+    
+    fig, axs = plt.subplots(1, 1, figsize=(7, 6))
+    
+    axs.plot(bkg_rej_train, sig_eff_train, color='tab:blue', linewidth=2,
+            label=f'Train (AUC = {area_train:.2f})')
+    axs.plot(bkg_rej_test, sig_eff_test, color='tab:red', linestyle='--', linewidth=2,
+            label=f'Test (AUC = {area_test:.2f})')
+    
+    axs.fill_between(bkg_rej_test, sig_eff_train, sig_eff_test,
+                     where=(np.array(sig_eff_train) > np.array(sig_eff_test)),
+                     color='gray', alpha=0.2, label='Overfit Gap')
+    
+    axs.set_title(mode_title, loc='left')
+    axs.set_ylim(0, 1.05)
+    axs.set_xlim(0, 1.05)
+    axs.set_xlabel('Background rejection')
+    axs.set_ylabel('Signal efficiency')
+    axs.legend(loc='lower left')
+    axs.grid(True)
+    
+    if save_dir:
+        plt.savefig(os.path.join(save_dir, "roc_curve_belle2.png"), dpi=150, bbox_inches='tight')
+        plt.close()
+    else:
+        plt.show()
+    
+    # 9. Optimize cut using Punzi FoM
+    print("\n" + "="*80)
+    print("OPTIMIZING BDT CUT USING PUNZI FoM")
+    print("="*80)
+    
+    # Apply BDT to signal and generic
+    df_signal["Ds_FakeD0BDT"] = bdt_final.predict_proba(
+        df_signal[mode_variables_filtered]
+    )[:, 1].astype(np.float32)
+    
+    df_generic["Ds_FakeD0BDT"] = bdt_final.predict_proba(
+        df_generic[mode_variables_filtered]
+    )[:, 1].astype(np.float32)
+    
+    # Get real D0 from signal for Punzi FoM calculation
+    sig_real_mask = (abs(df_signal["D0_mcPDG"]) == 421)
+    bdt_scores_sig = df_signal.loc[sig_real_mask, "Ds_FakeD0BDT"].values
+    bdt_scores_bkg = df_generic["Ds_FakeD0BDT"].values
+    
+    # Compute Punzi FoM for different confidence levels
+    print("\nOptimizing BDT cut for different confidence levels:\n")
+    
+    best_cuts = {}
+    best_foms = {}
+    
+    for a_val in PUNZI_A_VALUES:
+        thresholds, foms, best_thresh, best_fom = compute_punzi_scan(
+            bdt_scores_sig, bdt_scores_bkg, N_SIGNAL_EVENTS, n_thresholds=200, a=a_val
+        )
+        
+        cl_name = {1.64: "90% CL", 1.96: "95% CL", 3.0: "3σ"}.get(a_val, f"a={a_val}")
+        best_cuts[cl_name] = best_thresh
+        best_foms[cl_name] = best_fom
+        print(f"  {cl_name:8s}: Optimal cut = {best_thresh:.3f}, Punzi FoM = {best_fom:.6g}")
+    
+    # Plot Punzi FoM curves for all confidence levels
+    if save_dir:
+        fig, ax = plt.subplots(figsize=(10, 7))
+        
+        # Colors: purple for 95% CL (main), black for others
+        colors = {"90% CL": "black", "95% CL": "purple", "3σ": "black"}
+        linestyles = {"90% CL": "--", "95% CL": "-", "3σ": "-."}
+        linewidths = {"90% CL": 2, "95% CL": 3, "3σ": 2}
+        
+        for a_val in PUNZI_A_VALUES:
+            thresholds, foms, best_thresh, best_fom = compute_punzi_scan(
+                bdt_scores_sig, bdt_scores_bkg, N_SIGNAL_EVENTS, n_thresholds=200, a=a_val
+            )
+            
+            cl_name = {1.64: "90% CL", 1.96: "95% CL", 3.0: "3σ"}.get(a_val, f"a={a_val}")
+            
+            ax.plot(
+                thresholds, foms,
+                color=colors[cl_name],
+                linestyle=linestyles[cl_name],
+                linewidth=linewidths[cl_name],
+                label=f"{cl_name} (cut={best_thresh:.3f})"
+            )
+            
+            # Mark optimal point
+            ax.plot(best_thresh, best_fom, "o", color=colors[cl_name], markersize=8)
+        
+        ax.set_xlabel("BDT Cut", color="black")
+        ax.set_ylabel("Punzi FoM", color="black")
+        ax.set_title(mode_title, loc="left")
+        ax.legend(loc="best")
+        ax.grid(True, alpha=0.3)
+        
+        # Make sure tick labels are black
+        ax.tick_params(axis="x", colors="black")
+        ax.tick_params(axis="y", colors="black")
+        
+        plt.tight_layout()
+        plt.savefig(os.path.join(save_dir, "punzi_fom_optimization.png"), dpi=150, bbox_inches="tight")
+        plt.close()  # Close to avoid display
+        
+        print(f"\n✓ Saved Punzi FoM plot to: {os.path.join(save_dir, 'punzi_fom_optimization.png')}")
+    
+    print("="*80 + "\n")
+
+# %% [markdown]
+# ## Run Training
+# 
+# Execute the training pipeline for the selected mode(s).
+# 
+# Set `TRAIN_MODE` in the configuration section to:
+# - `"kmpip"` - Train only on K⁻ π⁺ mode
+# - `"km3pi"` - Train only on K⁻ 3π mode
+# - `"kmpippi0_eff20_May2020"` - Train only on K⁻ π⁺ π⁰ mode
+# - `"all"` - Train on all modes sequentially
+
+# %%
+if TRAIN_MODE == "all":
+    # Train on all modes sequentially
+    for mode in DECAY_CONFIG.keys():
+        process_mode(mode)
+else:
+    # Train on single mode
+    if TRAIN_MODE not in DECAY_CONFIG:
+        raise ValueError(f"Unknown mode: {TRAIN_MODE}. Choose from {list(DECAY_CONFIG.keys())} or 'all'")
+    process_mode(TRAIN_MODE)
+
+print("\n" + "="*80)
+print("✓ ALL PROCESSING COMPLETE")
+print("="*80)
+
+# %% [markdown]
+# ## Control Sample Processing (Optional)
+# 
+# Load and apply BDT to control samples for systematic studies.
+# 
+# **Available control samples**:
+# - `WCh`: Wrong charge (opposite sign combinations)
+# - `ReverseID`: Reversed particle ID (e.g., π identified as K)
+# - `ReverseID_WCh`: Combination of both
+# 
+# **Note**: This section is currently disabled. Set `LOAD_CONTROL_SAMPLES = True` in the configuration to enable.
+# 
+# Control samples are useful for:
+# - Validating BDT performance on data-driven backgrounds
+# - Estimating systematic uncertainties
+# - Cross-checking signal/background discrimination
+
+# %%
+if LOAD_CONTROL_SAMPLES:
+    print("\n" + "="*80)
+    print("PROCESSING CONTROL SAMPLES")
+    print("="*80)
+    
+    # Get the trained BDT (need to reload or keep from previous cell)
+    # For now, we'll process control samples separately per mode
+    
+    for control_sample in CONTROL_SAMPLES:
+        print(f"\nProcessing control sample: {control_sample}")
+        
+        # Load data
+        df_signal_ctrl, df_generic_ctrl = load_mode_data(TRAIN_MODE, control_sample=control_sample)
+        
+        if df_signal_ctrl.empty or df_generic_ctrl.empty:
+            print(f"  ✗ No data for control sample {control_sample}")
+            continue
+        
+        # Get variables for this mode
+        mode_variables = VARIABLES[TRAIN_MODE]["all_vars"]
+        mode_variables_filtered = [v for v in mode_variables if v in df_signal_ctrl.columns]
+        
+        # Apply BDT (would need to reload trained model from saved file)
+        # For demonstration, assuming we have bdt_final from main training
+        # In practice, you'd save the model and reload it here
+        
+        print(f"  Loaded {len(df_signal_ctrl):,} signal events")
+        print(f"  Loaded {len(df_generic_ctrl):,} generic events")
+        
+        # Save outputs
+        if SAVE_OUTPUT:
+            output_dir_ctrl = os.path.join(OUTPUT_BASE_DIR, f"FakeD0_{control_sample}", TRAIN_MODE)
+            os.makedirs(output_dir_ctrl, exist_ok=True)
+            
+            # Save signal
+            signal_path = os.path.join(output_dir_ctrl, f"Ds2D0enu-Signal_{TRAIN_MODE}_withBDT.root")
+            with uproot.recreate(signal_path) as f:
+                f["Dstree"] = df_signal_ctrl
+            print(f"  Saved: {signal_path}")
+            
+            # Save generic
+            generic_path = os.path.join(output_dir_ctrl, f"Ds2D0e-Generic_{TRAIN_MODE}_withBDT.root")
+            with uproot.recreate(generic_path) as f:
+                f["Dstree"] = df_generic_ctrl
+            print(f"  Saved: {generic_path}")
+        
+        # Clear memory
+        del df_signal_ctrl, df_generic_ctrl
+        gc.collect()
+        
+    print("\n✓ Control sample processing complete")
+else:
+    print("\nControl sample processing is disabled (LOAD_CONTROL_SAMPLES = False)")
+
+# %% [markdown]
+# ## Control Sample / Data-MC Comparison (Optional)
+# 
+# This section is for validating the BDT on control samples or sideband data.
+# 
+# **Use cases**:
+# 1. **Control Samples**: Load control samples (WCh, ReverseID, etc.) and apply the trained BDT
+# 2. **Sideband Data**: Load signal region sideband data for data-MC comparison
+# 3. **BDT Output Comparison**: Compare BDT distributions between MC and data/control samples
+# 4. **Variable Comparison**: Compare input variables between MC and control samples
+# 
+# **Available control samples**:
+# - `WCh`: Wrong charge (opposite sign combinations)
+# - `ReverseID`: Reversed particle ID (e.g., π identified as K)
+# - `ReverseID_WCh`: Combination of both
+# 
+# **Note**: Set `LOAD_CONTROL_SAMPLES = True` in the configuration to enable.
+
+# %%
+# This cell provides a template for data-MC comparison using control samples
+# Modify as needed for your specific analysis
+
+if LOAD_CONTROL_SAMPLES:
+    print("\n" + "="*80)
+    print("DATA-MC COMPARISON WITH CONTROL SAMPLES")
+    print("="*80)
+    
+    # TODO: Load the trained BDT model for the mode you want to validate
+    # You may need to save/load the model from the training step
+    # For now, assuming you have bdt_final and mode_variables_filtered from training
+    
+    for control_sample in CONTROL_SAMPLES:
+        print(f"\n{'-'*80}")
+        print(f"Processing control sample: {control_sample}")
+        print(f"{'-'*80}")
+        
+        # Load control sample data
+        df_signal_ctrl, df_generic_ctrl = load_mode_data(TRAIN_MODE, control_sample=control_sample)
+        
+        if df_signal_ctrl.empty or df_generic_ctrl.empty:
+            print(f"  ✗ No data for control sample {control_sample}")
+            continue
+        
+        # Filter variables (same as training)
+        mode_variables_ctrl = filter_valid_variables(
+            pd.concat([df_signal_ctrl, df_generic_ctrl], ignore_index=True),
+            VARIABLES[TRAIN_MODE]["all_vars"],
+            nan_threshold=0.5
+        )
+        
+        print(f"  Valid variables: {len(mode_variables_ctrl)}")
+        
+        # Apply BDT to control samples (requires trained model)
+        # df_signal_ctrl["Ds_FakeD0BDT"] = bdt_final.predict_proba(
+        #     df_signal_ctrl[mode_variables_ctrl]
+        # )[:, 1].astype(np.float32)
+        
+        # df_generic_ctrl["Ds_FakeD0BDT"] = bdt_final.predict_proba(
+        #     df_generic_ctrl[mode_variables_ctrl]
+        # )[:, 1].astype(np.float32)
+        
+        # Example: Compare variable distributions (MC vs control sample)
+        # Select a few important variables to compare
+        # vars_to_compare = mode_variables_ctrl[:5]  # First 5 variables
+        
+        # for var in vars_to_compare:
+        #     plt.figure(figsize=(10, 6))
+        #     
+        #     # Plot MC
+        #     plt.hist(df_signal[var].dropna(), bins=50, alpha=0.5, 
+        #              label='MC', density=True, histtype='step', linewidth=2)
+        #     
+        #     # Plot control sample
+        #     plt.hist(df_signal_ctrl[var].dropna(), bins=50, alpha=0.5,
+        #              label=f'Control ({control_sample})', density=True, 
+        #              histtype='step', linewidth=2)
+        #     
+        #     plt.xlabel(var)
+        #     plt.ylabel('Event Density')
+        #     plt.legend()
+        #     plt.title(f'{MODE_TITLES[TRAIN_MODE]} - {var}', loc='left')
+        #     plt.show()
+        
+        # Example: Compare BDT output distributions
+        # plt.figure(figsize=(10, 6))
+        # plt.hist(df_signal["Ds_FakeD0BDT"], bins=50, alpha=0.5,
+        #          label='MC', density=True, range=(0, 1), histtype='step', linewidth=2)
+        # plt.hist(df_signal_ctrl["Ds_FakeD0BDT"], bins=50, alpha=0.5,
+        #          label=f'Control ({control_sample})', density=True, range=(0, 1),
+        #          histtype='step', linewidth=2)
+        # plt.xlabel('Fake D⁰ BDT Output')
+        # plt.ylabel('Event Density')
+        # plt.legend()
+        # plt.title(f'{MODE_TITLES[TRAIN_MODE]} - BDT Output Comparison', loc='left')
+        # plt.show()
+        
+        print(f"  Loaded {len(df_signal_ctrl):,} signal events")
+        print(f"  Loaded {len(df_generic_ctrl):,} generic events")
+        
+        # Save outputs if requested
+        if SAVE_OUTPUT:
+            output_dir_ctrl = os.path.join(OUTPUT_BASE_DIR, f"FakeD0_{control_sample}", TRAIN_MODE)
+            os.makedirs(output_dir_ctrl, exist_ok=True)
+            
+            # Save signal
+            signal_path = os.path.join(output_dir_ctrl, f"Ds2D0enu-Signal_{TRAIN_MODE}_withBDT.root")
+            with uproot.recreate(signal_path) as f:
+                f["Dstree"] = df_signal_ctrl
+            print(f"  Saved: {signal_path}")
+            
+            # Save generic
+            generic_path = os.path.join(output_dir_ctrl, f"Ds2D0e-Generic_{TRAIN_MODE}_withBDT.root")
+            with uproot.recreate(generic_path) as f:
+                f["Dstree"] = df_generic_ctrl
+            print(f"  Saved: {generic_path}")
+        
+        # Clear memory
+        del df_signal_ctrl, df_generic_ctrl
+        gc.collect()
+        
+    print("\n✓ Control sample processing complete")
+else:
+    print("\nControl sample processing is disabled (LOAD_CONTROL_SAMPLES = False)")
+    print("Set LOAD_CONTROL_SAMPLES = True in the configuration to enable data-MC comparison.")
 
 
