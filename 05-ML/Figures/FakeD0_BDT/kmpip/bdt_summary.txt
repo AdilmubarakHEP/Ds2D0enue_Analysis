@@ -1,0 +1,135 @@
+
+================================================================================
+FAKE D⁰ BDT TRAINING SUMMARY - KMPIP
+================================================================================
+
+Generated: 2025-12-12T16:20:32.819923
+
+DATASET INFORMATION
+────────────────────────────────────────────────────────────────────────────────
+Training set:   257,731 events
+  - Signal:     216,659 events
+  - Background: 41,072 events
+
+Test set:       110,457 events
+  - Signal:     92,855 events
+  - Background: 17,602 events
+
+Features:       12 variables
+
+PERFORMANCE METRICS
+────────────────────────────────────────────────────────────────────────────────
+ROC AUC:
+  Training:     0.9037
+  Test:         0.8995
+  Difference:   -0.0042
+
+Kolmogorov-Smirnov Test (p-values):
+  Signal:       0.8332
+  Background:   0.0056
+
+Additional Distribution Metrics:
+  Jensen-Shannon Divergence (Background): 0.0262
+  Jensen-Shannon Divergence (Signal):     0.0112
+  Wasserstein Distance (Background):      0.0068
+  Wasserstein Distance (Signal):          0.0007
+
+Pull Statistics (Background):
+  Mean:         +0.192
+  Std Dev:      1.351
+  Max |Pull|:   3.075
+
+OPTIMAL BDT CUTS (Punzi FoM)
+────────────────────────────────────────────────────────────────────────────────
+  90% CL  : 0.8995
+  95% CL  : 0.8995
+  3σ      : 0.8995
+
+TOP 10 MOST IMPORTANT FEATURES
+────────────────────────────────────────────────────────────────────────────────
+   1. D0_daughterAngle_0_1                     0.3402
+   2. pi_Ch1_dr                                0.1146
+   3. D0_cos_decayAngle_0                      0.0953
+   4. D0_flightDistance                        0.0752
+   5. D0_flightDistanceErr                     0.0696
+   6. D0_chiProb                               0.0592
+   7. K_Ch1_dr                                 0.0555
+   8. K_Ch1_pt                                 0.0487
+   9. pi_Ch1_pt                                0.0468
+  10. K_Ch1_kaonID                             0.0403
+
+HYPERPARAMETERS
+────────────────────────────────────────────────────────────────────────────────
+  objective                : binary:logistic
+  base_score               : None
+  booster                  : None
+  callbacks                : None
+  colsample_bylevel        : None
+  colsample_bynode         : None
+  colsample_bytree         : 0.658714
+  device                   : None
+  early_stopping_rounds    : 20
+  enable_categorical       : False
+  eval_metric              : logloss
+  feature_types            : None
+  gamma                    : 1.203074
+  grow_policy              : None
+  importance_type          : None
+  interaction_constraints  : None
+  learning_rate            : 0.089796
+  max_bin                  : None
+  max_cat_threshold        : None
+  max_cat_to_onehot        : None
+  max_delta_step           : 1
+  max_depth                : 4
+  max_leaves               : None
+  min_child_weight         : 6
+  missing                  : nan
+  monotone_constraints     : None
+  multi_strategy           : None
+  n_estimators             : 147
+  n_jobs                   : 1
+  num_parallel_tree        : None
+  random_state             : 42
+  reg_alpha                : None
+  reg_lambda               : 1.845837
+  sampling_method          : None
+  scale_pos_weight         : 0.189570
+  subsample                : 0.773484
+  tree_method              : None
+  validate_parameters      : None
+  verbosity                : 0
+
+MODEL QUALITY ASSESSMENT
+────────────────────────────────────────────────────────────────────────────────
+Overall Quality: GOOD
+
+Strengths:
+  ✓ Excellent train/test AUC agreement (no overtraining)
+  ✓ Signal KS test p-value = 0.833 (good agreement)
+  ✓ Low Jensen-Shannon divergence for background (0.026)
+
+Concerns:
+  ⚠ Low background KS test p-value = 0.006 (statistical difference detected)
+
+Recommendations:
+  → Check background train/test distribution shape - KS test is sensitive even if practical performance is good
+  → Model is usable. KS test is sensitive to shape differences even if discrimination power (AUC) is identical.
+
+================================================================================
+USAGE NOTES FOR OVERALL BACKGROUND BDT
+────────────────────────────────────────────────────────────────────────────────
+
+This Fake D⁰ suppression BDT can be applied in two ways:
+
+1. HARD CUT: Apply recommended Punzi FoM cut as a selection requirement
+   - Use the optimal cut from the confidence level appropriate for your analysis
+   - Recommended for simple event selection
+
+2. BDT VARIABLE: Include Fake D⁰ BDT output as input to overall background BDT
+   - Allows overall BDT to learn optimal combination with other discriminants
+   - Recommended for maximum performance
+
+Recommendation: Test both approaches and compare final significance/FoM.
+
+================================================================================

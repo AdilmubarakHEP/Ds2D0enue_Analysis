@@ -1,0 +1,132 @@
+{
+  "metadata": {
+    "mode": "kmpippi0_eff20_May2020",
+    "timestamp": "2025-12-12T16:53:47.754122",
+    "n_features": 18,
+    "n_train": 890621,
+    "n_test": 381696,
+    "n_train_signal": 331934,
+    "n_train_background": 558687,
+    "n_test_signal": 142258,
+    "n_test_background": 239438
+  },
+  "performance": {
+    "train_auc": 0.8591587354868999,
+    "test_auc": 0.8586093691133013,
+    "auc_difference": -0.0005493663735985921,
+    "ks_test_signal": 0.5640376598495833,
+    "ks_test_background": 0.782528147109104,
+    "ks_statistic_signal": 0.0024949651400713035,
+    "ks_statistic_background": 0.0016015703591266695
+  },
+  "additional_metrics": {
+    "jensen_shannon_divergence_bkg": 0.005781168960643722,
+    "jensen_shannon_divergence_sig": 0.006586320519429476,
+    "wasserstein_distance_bkg": 0.0004574750645471994,
+    "wasserstein_distance_sig": 0.0008020523783569827
+  },
+  "pull_statistics": {
+    "mean": 0.002634482020395068,
+    "std": 1.1307009277004207,
+    "max_abs": 2.6528219723407815
+  },
+  "optimal_cuts": {
+    "90% CL": 0.678391959798995,
+    "95% CL": 0.678391959798995,
+    "3\u03c3": 0.678391959798995
+  },
+  "hyperparameters": {
+    "objective": "binary:logistic",
+    "base_score": null,
+    "booster": null,
+    "callbacks": null,
+    "colsample_bylevel": null,
+    "colsample_bynode": null,
+    "colsample_bytree": 0.6587135308855554,
+    "device": null,
+    "early_stopping_rounds": 20,
+    "enable_categorical": false,
+    "eval_metric": "logloss",
+    "feature_types": null,
+    "gamma": 1.2030741241575877,
+    "grow_policy": null,
+    "importance_type": null,
+    "interaction_constraints": null,
+    "learning_rate": 0.08979554340555938,
+    "max_bin": null,
+    "max_cat_threshold": null,
+    "max_cat_to_onehot": null,
+    "max_delta_step": 1,
+    "max_depth": 4,
+    "max_leaves": null,
+    "min_child_weight": 6,
+    "missing": NaN,
+    "monotone_constraints": null,
+    "multi_strategy": null,
+    "n_estimators": 147,
+    "n_jobs": 1,
+    "num_parallel_tree": null,
+    "random_state": 42,
+    "reg_alpha": null,
+    "reg_lambda": 1.845837458567821,
+    "sampling_method": null,
+    "scale_pos_weight": 1.683126766164358,
+    "subsample": 0.7734840422988521,
+    "tree_method": null,
+    "validate_parameters": null,
+    "verbosity": 0
+  },
+  "top_features": [
+    {
+      "feature": "D0_useCMSFrame_p",
+      "importance": 0.18707886338233948
+    },
+    {
+      "feature": "pi0_Ch2_pt",
+      "importance": 0.09089779108762741
+    },
+    {
+      "feature": "D0_flightDistanceErr",
+      "importance": 0.07872787863016129
+    },
+    {
+      "feature": "D0_daughterAngle_0_1",
+      "importance": 0.07728377729654312
+    },
+    {
+      "feature": "D0_flightDistance",
+      "importance": 0.07519101351499557
+    },
+    {
+      "feature": "D0_daughterInvM_0_2",
+      "importance": 0.07175865769386292
+    },
+    {
+      "feature": "D0_daughterInvM_1_2",
+      "importance": 0.05352330580353737
+    },
+    {
+      "feature": "K_Ch2_kaonID",
+      "importance": 0.05226295441389084
+    },
+    {
+      "feature": "D0_cos_decayAngle_0",
+      "importance": 0.0487259104847908
+    },
+    {
+      "feature": "pi_Ch2_pt",
+      "importance": 0.045707304030656815
+    }
+  ],
+  "assessment": {
+    "overall_quality": "EXCELLENT",
+    "concerns": [],
+    "strengths": [
+      "Excellent train/test AUC agreement (no overtraining)",
+      "Signal KS test p-value = 0.564 (good agreement)",
+      "Background KS test p-value = 0.783 (good agreement)",
+      "Low Jensen-Shannon divergence for background (0.006)"
+    ],
+    "recommendations": []
+  }
+}

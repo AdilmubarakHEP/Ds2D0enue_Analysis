@@ -1,0 +1,136 @@
+{
+  "metadata": {
+    "mode": "km3pi",
+    "timestamp": "2025-12-12T16:33:45.042282",
+    "n_features": 25,
+    "n_train": 574528,
+    "n_test": 246227,
+    "n_train_signal": 304710,
+    "n_train_background": 269818,
+    "n_test_signal": 130590,
+    "n_test_background": 115637
+  },
+  "performance": {
+    "train_auc": 0.8534923939697454,
+    "test_auc": 0.8506595270756339,
+    "auc_difference": -0.002832866894111552,
+    "ks_test_signal": 0.5949522228288922,
+    "ks_test_background": 0.044573577773226125,
+    "ks_statistic_signal": 0.0025423079868289733,
+    "ks_statistic_background": 0.004845161757933258
+  },
+  "additional_metrics": {
+    "jensen_shannon_divergence_bkg": 0.009029623780079064,
+    "jensen_shannon_divergence_sig": 0.006770967770457786,
+    "wasserstein_distance_bkg": 0.002222674490624848,
+    "wasserstein_distance_sig": 0.0010716217202614647
+  },
+  "pull_statistics": {
+    "mean": 0.18842970280558685,
+    "std": 1.2086840206781577,
+    "max_abs": 4.224817251546078
+  },
+  "optimal_cuts": {
+    "90% CL": 0.8291457286432161,
+    "95% CL": 0.8291457286432161,
+    "3\u03c3": 0.8291457286432161
+  },
+  "hyperparameters": {
+    "objective": "binary:logistic",
+    "base_score": null,
+    "booster": null,
+    "callbacks": null,
+    "colsample_bylevel": null,
+    "colsample_bynode": null,
+    "colsample_bytree": 0.6587135308855554,
+    "device": null,
+    "early_stopping_rounds": 20,
+    "enable_categorical": false,
+    "eval_metric": "logloss",
+    "feature_types": null,
+    "gamma": 1.2030741241575877,
+    "grow_policy": null,
+    "importance_type": null,
+    "interaction_constraints": null,
+    "learning_rate": 0.08979554340555938,
+    "max_bin": null,
+    "max_cat_threshold": null,
+    "max_cat_to_onehot": null,
+    "max_delta_step": 1,
+    "max_depth": 4,
+    "max_leaves": null,
+    "min_child_weight": 6,
+    "missing": NaN,
+    "monotone_constraints": null,
+    "multi_strategy": null,
+    "n_estimators": 147,
+    "n_jobs": 1,
+    "num_parallel_tree": null,
+    "random_state": 42,
+    "reg_alpha": null,
+    "reg_lambda": 1.845837458567821,
+    "sampling_method": null,
+    "scale_pos_weight": 0.885491122706836,
+    "subsample": 0.7734840422988521,
+    "tree_method": null,
+    "validate_parameters": null,
+    "verbosity": 0
+  },
+  "top_features": [
+    {
+      "feature": "D0_useCMSFrame_p",
+      "importance": 0.16926324367523193
+    },
+    {
+      "feature": "D0_chiProb",
+      "importance": 0.14758947491645813
+    },
+    {
+      "feature": "D0_flightDistance",
+      "importance": 0.0934324860572815
+    },
+    {
+      "feature": "pi2_Ch3_pt",
+      "importance": 0.06721676886081696
+    },
+    {
+      "feature": "D0_flightDistanceErr",
+      "importance": 0.06474672257900238
+    },
+    {
+      "feature": "K_Ch3_kaonID",
+      "importance": 0.052013810724020004
+    },
+    {
+      "feature": "pi3_Ch3_pt",
+      "importance": 0.044309262186288834
+    },
+    {
+      "feature": "pi1_Ch3_pt",
+      "importance": 0.03785145282745361
+    },
+    {
+      "feature": "pi3_Ch3_dr",
+      "importance": 0.03678886219859123
+    },
+    {
+      "feature": "pi2_Ch3_dr",
+      "importance": 0.0344550684094429
+    }
+  ],
+  "assessment": {
+    "overall_quality": "GOOD",
+    "concerns": [
+      "Low background KS test p-value = 0.045 (statistical difference detected)"
+    ],
+    "strengths": [
+      "Excellent train/test AUC agreement (no overtraining)",
+      "Signal KS test p-value = 0.595 (good agreement)",
+      "Low Jensen-Shannon divergence for background (0.009)"
+    ],
+    "recommendations": [
+      "Check background train/test distribution shape - KS test is sensitive even if practical performance is good",
+      "Model is usable. KS test is sensitive to shape differences even if discrimination power (AUC) is identical."
+    ]
+  }
+}
