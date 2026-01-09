@@ -1,0 +1,350 @@
+{
+    "_comment": "Plot configuration for Fake vs Real D0 distributions - organized by mode",
+    "_usage": "Each variable has: xlabel, xrange, logy, logx, nbins",
+
+    "global_settings": {
+        "figsize_individual": [6, 6],
+        "dpi": 150,
+        "color_real": "purple",
+        "color_fake": "#D55E00",
+        "linewidth": 2.5,
+        "legend_fontsize": 14,
+        "label_fontsize": 20,
+        "tick_fontsize": 12,
+        "title_fontsize": 14,
+        "use_density": true,
+        "histtype": "step"
+    },
+
+    "mode_titles": {
+        "kmpip": "$D_s^{+} \\to [D^{0} \\to K^{-} \\pi^{+}] e^{+} \\nu_{e}$",
+        "kmpippi0_eff20_May2020": "$D_s^{+} \\to [D^{0} \\to K^{-} \\pi^{+} \\pi^{0}] e^{+} \\nu_{e}$",
+        "km3pi": "$D_s^{+} \\to [D^{0} \\to K^{-} 3\\pi] e^{+} \\nu_{e}$"
+    },
+
+    "grid_settings": {
+        "default_grid": [3, 4],
+        "subplot_size": 3.5,
+        "legend_position": "upper right",
+        "shared_legend": true,
+        "legend_in_last_empty": true,
+        "wspace": 0.20,
+        "hspace": 0.20
+    },
+
+    "kmpip": {
+        "_variables": ["D0_useCMSFrame_p", "D0_chiProb", "D0_daughterAngle_0_1", "D0_cos_decayAngle_0", "D0_flightDistance", "D0_flightDistanceErr", "K_Ch1_kaonID", "K_Ch1_dr", "pi_Ch1_pionID", "pi_Ch1_dr"],
+
+        "D0_useCMSFrame_p": {
+            "xlabel": "$p_{D^0}^{\\mathrm{CMS}}$ [GeV/$c$]",
+            "xrange": [2.5, 4.5],
+            "logy": false,
+            "logx": false,
+            "nbins": 50
+        },
+        "D0_chiProb": {
+            "xlabel": "$\\chi^2$ probability",
+            "xrange": [0.0, 1.0],
+            "logy": true,
+            "logx": false,
+            "nbins": 50
+        },
+        "D0_daughterAngle_0_1": {
+            "xlabel": "$\\theta_{K\\pi}$ [rad]",
+            "xrange": [0.0, 3.14159],
+            "logy": false,
+            "logx": false,
+            "nbins": 50
+        },
+        "D0_cos_decayAngle_0": {
+            "xlabel": "$\\cos\\theta_{K}^{\\mathrm{hel}}$",
+            "xrange": [-1.0, 1.0],
+            "logy": false,
+            "logx": false,
+            "nbins": 50
+        },
+        "D0_flightDistance": {
+            "xlabel": "$L_{D^0}$ [cm]",
+            "xrange": [-0.1, 0.1],
+            "logy": false,
+            "logx": false,
+            "nbins": 50
+        },
+        "D0_flightDistanceErr": {
+            "xlabel": "$\\sigma(L_{D^0})$ [cm]",
+            "xrange": [0.0, 0.8],
+            "logy": false,
+            "logx": true,
+            "nbins": 50
+        },
+        "K_Ch1_kaonID": {
+            "xlabel": "$\\mathcal{L}_K$",
+            "xrange": [0.5, 1.0],
+            "logy": true,
+            "logx": false,
+            "nbins": 50
+        },
+        "K_Ch1_dr": {
+            "xlabel": "$d_r(K^-)$ [cm]",
+            "xrange": [0.0, 0.04],
+            "logy": false,
+            "logx": false,
+            "nbins": 50
+        },
+        "pi_Ch1_pionID": {
+            "xlabel": "$\\mathcal{L}_\\pi$",
+            "xrange": [0.2, 1.0],
+            "logy": true,
+            "logx": false,
+            "nbins": 50
+        },
+        "pi_Ch1_dr": {
+            "xlabel": "$d_r(\\pi^+)$ [cm]",
+            "xrange": [0.0, 0.04],
+            "logy": false,
+            "logx": false,
+            "nbins": 50
+        }
+    },
+
+    "kmpippi0_eff20_May2020": {
+        "_variables": ["D0_daughterInvM_0_1", "D0_daughterInvM_0_2", "D0_daughterInvM_1_2", "D0_useCMSFrame_p", "D0_chiProb", "D0_cos_decayAngle_0", "D0_cos_decayAngle_1", "D0_flightDistance", "D0_flightDistanceErr", "K_Ch2_kaonID", "K_Ch2_dr", "pi_Ch2_pionID", "pi_Ch2_dr"],
+
+        "D0_daughterInvM_0_1": {
+            "xlabel": "$m(K^-\\pi^+)$ [GeV/$c^2$]",
+            "xrange": [0.6, 1.8],
+            "logy": false,
+            "logx": false,
+            "nbins": 50
+        },
+        "D0_daughterInvM_0_2": {
+            "xlabel": "$m(K^-\\pi^0)$ [GeV/$c^2$]",
+            "xrange": [0.6, 1.8],
+            "logy": false,
+            "logx": false,
+            "nbins": 50
+        },
+        "D0_daughterInvM_1_2": {
+            "xlabel": "$m(\\pi^+\\pi^0)$ [GeV/$c^2$]",
+            "xrange": [0.2, 1.4],
+            "logy": false,
+            "logx": false,
+            "nbins": 50
+        },
+        "D0_useCMSFrame_p": {
+            "xlabel": "$p_{D^0}^{\\mathrm{CMS}}$ [GeV/$c$]",
+            "xrange": [2.5, 4.5],
+            "logy": false,
+            "logx": false,
+            "nbins": 50
+        },
+        "D0_chiProb": {
+            "xlabel": "$\\chi^2$ probability",
+            "xrange": [0.0, 1.0],
+            "logy": true,
+            "logx": false,
+            "nbins": 50
+        },
+        "D0_cos_decayAngle_0": {
+            "xlabel": "$\\cos\\theta_{K}^{\\mathrm{hel}}$",
+            "xrange": [-1.0, 1.0],
+            "logy": false,
+            "logx": false,
+            "nbins": 50
+        },
+        "D0_cos_decayAngle_1": {
+            "xlabel": "$\\cos\\theta_{\\pi^+}^{\\mathrm{hel}}$",
+            "xrange": [-1.0, 1.0],
+            "logy": false,
+            "logx": false,
+            "nbins": 50
+        },
+        "D0_flightDistance": {
+            "xlabel": "$L_{D^0}$ [cm]",
+            "xrange": [-0.1, 0.1],
+            "logy": false,
+            "logx": false,
+            "nbins": 50
+        },
+        "D0_flightDistanceErr": {
+            "xlabel": "$\\sigma(L_{D^0})$ [cm]",
+            "xrange": [0.0, 0.8],
+            "logy": false,
+            "logx": true,
+            "nbins": 50
+        },
+        "K_Ch2_kaonID": {
+            "xlabel": "$\\mathcal{L}_K$",
+            "xrange": [0.5, 1.0],
+            "logy": true,
+            "logx": false,
+            "nbins": 50
+        },
+        "K_Ch2_dr": {
+            "xlabel": "$d_r(K^-)$ [cm]",
+            "xrange": [0.0, 0.04],
+            "logy": false,
+            "logx": false,
+            "nbins": 50
+        },
+        "pi_Ch2_pionID": {
+            "xlabel": "$\\mathcal{L}_\\pi$",
+            "xrange": [0.2, 1.0],
+            "logy": true,
+            "logx": false,
+            "nbins": 50
+        },
+        "pi_Ch2_dr": {
+            "xlabel": "$d_r(\\pi^+)$ [cm]",
+            "xrange": [0.0, 0.1],
+            "logy": false,
+            "logx": false,
+            "nbins": 50
+        }
+    },
+
+    "km3pi": {
+        "_variables": ["D0_cos_decayAngle_2", "D0_cos_decayAngle_3", "D0_daughterInvM_0_1", "D0_daughterInvM_0_3", "D0_daughterInvM_1_2", "D0_daughterInvM_2_3", "D0_useCMSFrame_p", "D0_chiProb", "D0_cos_decayAngle_0", "D0_cos_decayAngle_1", "D0_flightDistance", "D0_flightDistanceErr", "K_Ch3_kaonID", "K_Ch3_dr", "pi1_Ch3_pionID", "pi1_Ch3_dr", "pi2_Ch3_pionID", "pi2_Ch3_dr", "pi3_Ch3_pionID", "pi3_Ch3_dr"],
+
+        "D0_cos_decayAngle_2": {
+            "xlabel": "$\\cos\\theta_{\\pi_2}^{\\mathrm{hel}}$",
+            "xrange": [-1.0, 1.0],
+            "logy": false,
+            "logx": false,
+            "nbins": 50
+        },
+        "D0_cos_decayAngle_3": {
+            "xlabel": "$\\cos\\theta_{\\pi_3}^{\\mathrm{hel}}$",
+            "xrange": [-1.0, 1.0],
+            "logy": false,
+            "logx": false,
+            "nbins": 50
+        },
+        "D0_daughterInvM_0_1": {
+            "xlabel": "$m(K^-\\pi_1^+)$ [GeV/$c^2$]",
+            "xrange": [0.6, 1.6],
+            "logy": false,
+            "logx": false,
+            "nbins": 50
+        },
+        "D0_daughterInvM_0_3": {
+            "xlabel": "$m(K^-\\pi_3^+)$ [GeV/$c^2$]",
+            "xrange": [0.6, 1.6],
+            "logy": false,
+            "logx": false,
+            "nbins": 50
+        },
+        "D0_daughterInvM_1_2": {
+            "xlabel": "$m(\\pi_1^+\\pi_2^-)$ [GeV/$c^2$]",
+            "xrange": [0.2, 1.4],
+            "logy": false,
+            "logx": false,
+            "nbins": 50
+        },
+        "D0_daughterInvM_2_3": {
+            "xlabel": "$m(\\pi_2^-\\pi_3^+)$ [GeV/$c^2$]",
+            "xrange": [0.2, 1.4],
+            "logy": false,
+            "logx": false,
+            "nbins": 50
+        },
+        "D0_useCMSFrame_p": {
+            "xlabel": "$p_{D^0}^{\\mathrm{CMS}}$ [GeV/$c$]",
+            "xrange": [2.5, 4.5],
+            "logy": false,
+            "logx": false,
+            "nbins": 50
+        },
+        "D0_chiProb": {
+            "xlabel": "$\\chi^2$ probability",
+            "xrange": [0.0, 1.0],
+            "logy": true,
+            "logx": false,
+            "nbins": 50
+        },
+        "D0_cos_decayAngle_0": {
+            "xlabel": "$\\cos\\theta_{K}^{\\mathrm{hel}}$",
+            "xrange": [-1.0, 1.0],
+            "logy": false,
+            "logx": false,
+            "nbins": 50
+        },
+        "D0_cos_decayAngle_1": {
+            "xlabel": "$\\cos\\theta_{\\pi_1}^{\\mathrm{hel}}$",
+            "xrange": [-1.0, 1.0],
+            "logy": false,
+            "logx": false,
+            "nbins": 50
+        },
+        "D0_flightDistance": {
+            "xlabel": "$L_{D^0}$ [cm]",
+            "xrange": [-0.1, 0.1],
+            "logy": false,
+            "logx": false,
+            "nbins": 50
+        },
+        "D0_flightDistanceErr": {
+            "xlabel": "$\\sigma(L_{D^0})$ [cm]",
+            "xrange": [0.0, 0.8],
+            "logy": false,
+            "logx": true,
+            "nbins": 50
+        },
+        "K_Ch3_kaonID": {
+            "xlabel": "$\\mathcal{L}_K$",
+            "xrange": [0.5, 1.0],
+            "logy": true,
+            "logx": false,
+            "nbins": 50
+        },
+        "K_Ch3_dr": {
+            "xlabel": "$d_r(K^-)$ [cm]",
+            "xrange": [0.0, 0.04],
+            "logy": false,
+            "logx": false,
+            "nbins": 50
+        },
+        "pi1_Ch3_pionID": {
+            "xlabel": "$\\mathcal{L}_{\\pi_1}$",
+            "xrange": [0.2, 1.0],
+            "logy": true,
+            "logx": false,
+            "nbins": 50
+        },
+        "pi1_Ch3_dr": {
+            "xlabel": "$d_r(\\pi_1^+)$ [cm]",
+            "xrange": [0.0, 0.1],
+            "logy": false,
+            "logx": false,
+            "nbins": 50
+        },
+        "pi2_Ch3_pionID": {
+            "xlabel": "$\\mathcal{L}_{\\pi_2}$",
+            "xrange": [0.2, 1.0],
+            "logy": true,
+            "logx": false,
+            "nbins": 50
+        },
+        "pi2_Ch3_dr": {
+            "xlabel": "$d_r(\\pi_2^-)$ [cm]",
+            "xrange": [0.0, 0.1],
+            "logy": false,
+            "logx": false,
+            "nbins": 50
+        },
+        "pi3_Ch3_pionID": {
+            "xlabel": "$\\mathcal{L}_{\\pi_3}$",
+            "xrange": [0.2, 1.0],
+            "logy": true,
+            "logx": false,
+            "nbins": 50
+        },
+        "pi3_Ch3_dr": {
+            "xlabel": "$d_r(\\pi_3^+)$ [cm]",
+            "xrange": [0.0, 0.1],
+            "logy": false,
+            "logx": false,
+            "nbins": 50
+        }
+    }
+}

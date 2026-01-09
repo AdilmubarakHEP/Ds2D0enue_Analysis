@@ -1,0 +1,10 @@
+Collections:
+    /belle/collection/MC/MC16rd_proc16_chunk1_ccbar_4S_v1
+    /belle/collection/MC/MC16rd_proc16_chunk1_charged_4S_v1
+    /belle/collection/MC/MC16rd_proc16_chunk1_ddbar_4S_v1
+    /belle/collection/MC/MC16rd_proc16_chunk1_mixed_4S_v1
+    /belle/collection/MC/MC16rd_proc16_chunk1_ssbar_4S_v1
+    /belle/collection/MC/MC16rd_proc16_chunk1_taupair_4S_v1
+    /belle/collection/MC/MC16rd_proc16_chunk1_uubar_4S_v1
+
+int_luminosity: 215.28939989827998 /fb

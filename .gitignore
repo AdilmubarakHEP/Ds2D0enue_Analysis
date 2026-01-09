@@ -1,0 +1,7 @@
+**/__pycache__/
+**/.ipynb_checkpoints/
+**/logs/
+**/task_files/
+**/TopoAna/topoana/
+**/04-b2luigi/luigid_logs
+**/04-b2luigi/gbasf2/worker_logs

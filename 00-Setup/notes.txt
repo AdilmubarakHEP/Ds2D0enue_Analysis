@@ -1,0 +1,55 @@
+Source:
+    source /cvmfs/belle.cern.ch/tools/b2setup release-08-01-08
+    source /cvmfs/belle.cern.ch/tools/b2setup light-2403-persian
+
+Look for Particles
+    b2help-particles --pdg 23
+
+Event Generation:
+    D_s+
+    for i in {1..20};do bsub -q l "basf2 /home/belle2/amubarak/Ds2D0enue_Analysis/KEK_Server/Event_Generation/Steering/Ds2D0enu_EventGeneration.py -n 5000 -o /home/belle2/amubarak/C00-Generation/D_s+/ccbarDs+EventGeneration_$i.root";done
+    b2file-merge C00-Generation/D_s/ccbarDs+EventGeneration.root C00-Generation/D_s-/mdst/sub00/*.root C00-Generation/D_s+/mdst/sub00/*.root
+    D*+
+    for i in {1..100};do bsub -q l "basf2 /home/belle2/amubarak/Ds2D0enue_Analysis/KEK_Server/Event_Generation/Steering/Dstar+2D0pi+_EventGeneration.py -n 5000 -o /home/belle2/amubarak/C00-Generation/Dstar+/ccbarDstar+EventGeneration_$i.root";done
+
+Reconstruction:
+    D_s+:
+    basf2 Ds2D0enue_Analysis/Steering_Scripts/Ds2D0e-Reconstruction.py -i C00-Generation/Completed/ccbarDs+EventGeneration.root -o C01-Simulated_Events/Ds2D0enu-Signal.root
+    D*+:
+    basf2 Steering_Scripts/Dstar2D0Pi-Reconstruction.py -i "Generation/Dstar+/*.root" -o Simulated_Events/Dstar2D0Pi-Background.root
+
+Machine Learning:
+    basf2 MVA/Ds2D0e-Reconstruction_MVA.py -i "Generation/D_s+/*.root"
+
+    Signal:
+    basf2_mva_expert --identifiers MVA/Completed/MVAFastBDT.root \
+                 --datafiles Simulated_Events/Ds2D0enu-Signal.root \
+                 --treename dstree \
+                 --outputfile MVA/Completed/Ds2D0enu-Signal_MVA.root
+
+    Background:
+    basf2_mva_expert --identifiers MVA/Completed/MVAFastBDT.root \
+                 --datafiles Grid/Completed/Ds2D0e-Generic_Ds_070424_ccbar.root \
+                 --treename dstree \
+                 --outputfile MVA/Completed/Ds2D0enu-Background_MVA.root
+    
+Truth Information:
+    basf2 Ds2D0enue_Analysis/KEK_Server/Steering_Scripts/Generator_Info/Ds2D0e-Truth.py -i "C00-Generation/Signal/*.root" -o C04-Generator_Level/D_s+_Truth.root
+    basf2 Ds2D0enue_Analysis/KEK_Server/Steering_Scripts/Generator_Info/Dsts2DsGamma-Truth.py -i "C00-Generation/D_s+/*.root" -o C04-Generator_Level/D_sstar+_Truth.root
+
+Batch Submission:
+    bjobs (To check the job status)
+    bkill 0 (kill all jobs)
+    bsub -q <queue name> "basf2 <your_working_script>"
+
+Topoana:
+    topoana.exe topoana/Analysis/topoana_Ds.card
+
+Gitlab: (Qutm477am)
+    cd Ds2D0enue_Analysis
+    git status
+    git add .
+    git commit -m "update"
+    git push -uf origin KEK_Server
+
+basf2 Steering_Scripts/test.py -i "Generation/D_s+/*.root" -o test.root

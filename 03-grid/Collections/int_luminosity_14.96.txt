@@ -1,0 +1,8 @@
+Collections:
+    /belle/collection/MC/MC15rd_ccbar_exp20_bucket26_v1
+    /belle/collection/MC/MC15rd_charged_exp20_bucket26_v1
+    /belle/collection/MC/MC15rd_ddbar_exp20_bucket26_v1
+    /belle/collection/MC/MC15rd_mixed_exp20_bucket26_v1
+    /belle/collection/MC/MC15rd_ssbar_exp20_bucket26_v1
+    /belle/collection/MC/MC15rd_taupair_exp20_bucket26_v1
+    /belle/collection/MC/MC15rd_uubar_exp20_bucket26_v1

@@ -1,0 +1,8 @@
+/belle/collection/MC/RSC_MC15rd_4S_ccbar_skim_17230100_v3
+/belle/collection/MC/RSC_MC15rd_4S_BB_skim_17230100_v3
+/belle/collection/MC/RSC_MC15rd_4S_ddbar_skim_17230100_v3
+/belle/collection/MC/RSC_MC15rd_4S_ssbar_skim_17230100_v3
+/belle/collection/MC/RSC_MC15rd_4S_taupair_skim_17230100_v3
+/belle/collection/MC/RSC_MC15rd_4S_uubar_skim_17230100_v3
+
+int_luminosity: 1443.999 /fb
